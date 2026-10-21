@@ -16,6 +16,11 @@ export interface AuditLogEntry {
   action: string;
   adminEmail: string;
   details?: string;
+  role?: string;
+  collection?: string;
+  itemId?: string;
+  beforeSummary?: string;
+  afterSummary?: string;
 }
 
 /**
@@ -38,7 +43,14 @@ export function createAuditLogEntry(
   action: string,
   adminEmail: string,
   details?: string,
-  timestamp: string = new Date().toISOString()
+  timestamp: string = new Date().toISOString(),
+  extra?: {
+    role?: string;
+    collection?: string;
+    itemId?: string;
+    beforeSummary?: string;
+    afterSummary?: string;
+  }
 ): AuditLogEntry {
   return {
     id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
@@ -46,6 +58,11 @@ export function createAuditLogEntry(
     action,
     adminEmail,
     details,
+    ...(extra?.role ? { role: extra.role } : {}),
+    ...(extra?.collection ? { collection: extra.collection } : {}),
+    ...(extra?.itemId ? { itemId: extra.itemId } : {}),
+    ...(extra?.beforeSummary ? { beforeSummary: extra.beforeSummary } : {}),
+    ...(extra?.afterSummary ? { afterSummary: extra.afterSummary } : {}),
   };
 }
 

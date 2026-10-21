@@ -57,6 +57,12 @@ export const DirectEnrollmentModal: React.FC<DirectEnrollmentModalProps> = ({
       phone: phone.trim(),
       email: email.trim() || undefined,
       spots: 1,
+      projectId: project.id,
+      enrollmentStatus: 'pendente',
+      studentName: studentName.trim(),
+      studentAge,
+      responsibleName: responsibleName.trim() || undefined,
+      modalityOrClass: `${project.name} · ${turnLabel}`,
     });
     setEnrollmentProtocol(protocolNum);
 

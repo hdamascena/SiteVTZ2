@@ -1,258 +1,557 @@
 rules_version = '2';
 
+// Associação Esportiva Vitalizar - Firestore Security Rules (RBAC + LGPD)
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Default deny all
+    function isPrimarySuperAdmin() {
+      return request.auth != null
+        && request.auth.token.email == 'higor.rock2011@gmail.com';
+    }
+
+    function adminDocExists() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function adminData() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data;
+    }
+
+    function role() {
+      return isPrimarySuperAdmin()
+        ? 'super_admin'
+        : (adminDocExists() ? adminData().role : 'none');
+    }
+
+    function isActive() {
+      return isPrimarySuperAdmin()
+        || (adminDocExists() && adminData().ativo == true);
+    }
+
+    function hasRole(roles) {
+      return isActive() && (role() in roles);
+    }
+
+    function teachesProject(projectId) {
+      return isActive()
+        && role() == 'professor'
+        && ('projectIds' in adminData())
+        && (adminData().projectIds is list)
+        && (projectId in adminData().projectIds);
+    }
+
+    function nonEmptyStr(val, max) {
+      return val is string && val.size() > 0 && val.size() <= max;
+    }
+
+    function optStr(data, field, max) {
+      return !(field in data) || data[field] == null
+        || (data[field] is string && data[field].size() <= max);
+    }
+
+    function validClubInfo() {
+      let d = request.resource.data;
+      return nonEmptyStr(d.name, 200)
+        && nonEmptyStr(d.shortName, 80)
+        && nonEmptyStr(d.cnpj, 30)
+        && nonEmptyStr(d.email, 200)
+        && d.phones is list && d.phones.size() <= 10;
+    }
+
+    // Pledges and attendance carry personal data and live in their own admin-only collections
+    function validSiteSettings() {
+      let d = request.resource.data;
+      return nonEmptyStr(d.seoTitle, 200)
+        && nonEmptyStr(d.seoDescription, 1000)
+        && nonEmptyStr(d.whatsappNumber, 40)
+        && d.enableRegistrations is bool
+        && d.enableSponsorsSection is bool
+        && d.enableFloatingWhatsapp is bool
+        && d.enableSearch is bool
+        && d.enableRsvpModal is bool
+        && !('donationPledges' in d)
+        && !('attendanceSessions' in d);
+    }
+
+    function validNewsArticle(docId) {
+      let d = request.resource.data;
+      return d.id == docId
+        && nonEmptyStr(d.title, 300)
+        && nonEmptyStr(d.date, 60)
+        && nonEmptyStr(d.category, 100)
+        && nonEmptyStr(d.summary, 2000)
+        && d.content is list && d.content.size() <= 200
+        && optStr(d, 'imageUrl', 2000)
+        && optStr(d, 'author', 120)
+        && optStr(d, 'status', 40);
+    }
+
+    function validSponsor(docId) {
+      let d = request.resource.data;
+      return d.id == docId
+        && nonEmptyStr(d.name, 200)
+        && d.tier in ['master', 'ouro', 'prata', 'bronze', 'apoio']
+        && nonEmptyStr(d.tierLabel, 100)
+        && nonEmptyStr(d.logoUrl, 2000)
+        && optStr(d, 'websiteUrl', 2000)
+        && optStr(d, 'description', 2000)
+        && nonEmptyStr(d.category, 100)
+        && d.active is bool
+        && d.order is number;
+    }
+
+    function validEvent(docId) {
+      let d = request.resource.data;
+      return d.id == docId
+        && nonEmptyStr(d.title, 300)
+        && d.category in ['clinica_esportiva', 'oficina_comunitaria', 'reuniao_associacao']
+        && nonEmptyStr(d.date, 40)
+        && nonEmptyStr(d.time, 80)
+        && nonEmptyStr(d.location, 300)
+        && d.capacity is number && d.capacity >= 0 && d.capacity <= 100000
+        && d.availableSpots is number && d.availableSpots >= 0 && d.availableSpots <= d.capacity
+        && d.isFree is bool
+        && nonEmptyStr(d.description, 5000)
+        && d.status in ['confirmado', 'inscricoes_abertas', 'vagas_limitadas', 'em_breve'];
+    }
+
+    function validProject(docId) {
+      let d = request.resource.data;
+      return d.id == docId
+        && nonEmptyStr(d.name, 200)
+        && nonEmptyStr(d.category, 100)
+        && nonEmptyStr(d.targetAudience, 300)
+        && nonEmptyStr(d.description, 5000)
+        && nonEmptyStr(d.schedule, 300)
+        && nonEmptyStr(d.location, 300)
+        && nonEmptyStr(d.coordinator, 200)
+        && nonEmptyStr(d.fundingSource, 300)
+        && optStr(d, 'imageUrl', 2000)
+        && (!('participants' in d) || (d.participants is list && d.participants.size() <= 500));
+    }
+
+    function validParticipantPrivate(docId) {
+      let d = request.resource.data;
+      return d.id == docId
+        && nonEmptyStr(d.projectId, 120)
+        && nonEmptyStr(d.participantName, 200)
+        && optStr(d, 'birthDate', 40)
+        && optStr(d, 'weight', 40)
+        && optStr(d, 'height', 40)
+        && optStr(d, 'bmi', 40)
+        && optStr(d, 'nextfitCode', 80)
+        && optStr(d, 'planName', 120)
+        && optStr(d, 'responsibleName', 200)
+        && optStr(d, 'phone', 60)
+        && optStr(d, 'email', 200)
+        && optStr(d, 'healthNotes', 2000);
+    }
+
+    function validGalleryAlbum(docId) {
+      let d = request.resource.data;
+      return d.id == docId
+        && nonEmptyStr(d.title, 300)
+        && nonEmptyStr(d.category, 100)
+        && nonEmptyStr(d.date, 80)
+        && nonEmptyStr(d.location, 300)
+        && nonEmptyStr(d.coverUrl, 2000)
+        && optStr(d, 'caption', 1000)
+        && d.albumPhotos is list && d.albumPhotos.size() <= 200;
+    }
+
+    function validTransparencyDoc(docId) {
+      let d = request.resource.data;
+      return d.id == docId
+        && nonEmptyStr(d.title, 300)
+        && d.category in ['estatuto', 'cnpj', 'governanca', 'emendas', 'fomento', 'prestacao_contas', 'certidoes']
+        && nonEmptyStr(d.date, 80)
+        && nonEmptyStr(d.description, 4000)
+        && nonEmptyStr(d.fileType, 80)
+        && nonEmptyStr(d.badge, 120);
+    }
+
+    function validFacilityPolo(docId) {
+      let d = request.resource.data;
+      return d.id == docId
+        && nonEmptyStr(d.name, 200)
+        && d.type in ['polo_principal', 'quadra_poliesportiva', 'sala_atividades', 'espaco_saude']
+        && nonEmptyStr(d.capacity, 200)
+        && d.maxGuests is number && d.maxGuests > 0 && d.maxGuests <= 100000
+        && nonEmptyStr(d.address, 300)
+        && nonEmptyStr(d.description, 3000)
+        && d.includedItems is list && d.includedItems.size() <= 100
+        && d.rules is list && d.rules.size() <= 100;
+    }
+
+    function validRsvp(docId) {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+          'id', 'eventId', 'eventTitle', 'name', 'phone', 'email', 'notes',
+          'spots', 'date', 'confirmationCode', 'projectId', 'enrollmentStatus',
+          'studentName', 'studentAge', 'responsibleName', 'modalityOrClass', 'userId'
+        ])
+        && d.id == docId
+        && nonEmptyStr(d.eventId, 120)
+        && nonEmptyStr(d.eventTitle, 300)
+        && nonEmptyStr(d.name, 240)
+        && nonEmptyStr(d.phone, 40)
+        && optStr(d, 'email', 200)
+        && optStr(d, 'notes', 1000)
+        && optStr(d, 'projectId', 120)
+        && optStr(d, 'enrollmentStatus', 40)
+        && optStr(d, 'studentName', 200)
+        && optStr(d, 'responsibleName', 200)
+        && optStr(d, 'modalityOrClass', 120)
+        && optStr(d, 'userId', 128)
+        && d.spots is int && d.spots >= 1 && d.spots <= 10
+        && nonEmptyStr(d.date, 60)
+        && nonEmptyStr(d.confirmationCode, 40);
+    }
+
+    function validContactMessage(docId) {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['id', 'name', 'email', 'phone', 'subject', 'message', 'date', 'read'])
+        && d.id == docId
+        && nonEmptyStr(d.name, 120)
+        && nonEmptyStr(d.email, 200)
+        && nonEmptyStr(d.phone, 40)
+        && nonEmptyStr(d.subject, 120)
+        && nonEmptyStr(d.message, 4000)
+        && nonEmptyStr(d.date, 60)
+        && d.read is bool;
+    }
+
+    function validScoutInquiry(docId) {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+          'id', 'protocol', 'scoutName', 'organization', 'role', 'credentialsId',
+          'phone', 'email', 'inquiryType', 'targetPlayerName', 'targetCategory',
+          'preferredDate', 'message', 'projectName', 'createdAt', 'status'
+        ])
+        && d.id == docId
+        && nonEmptyStr(d.protocol, 40)
+        && nonEmptyStr(d.scoutName, 120)
+        && nonEmptyStr(d.organization, 200)
+        && nonEmptyStr(d.role, 120)
+        && optStr(d, 'credentialsId', 80)
+        && nonEmptyStr(d.phone, 40)
+        && nonEmptyStr(d.email, 200)
+        && d.inquiryType in ['avaliacao_clube', 'visita_treino', 'relatorio_atleta', 'parceria_base']
+        && optStr(d, 'targetPlayerName', 160)
+        && nonEmptyStr(d.targetCategory, 80)
+        && optStr(d, 'preferredDate', 40)
+        && nonEmptyStr(d.message, 4000)
+        && nonEmptyStr(d.projectName, 200)
+        && nonEmptyStr(d.createdAt, 60)
+        && d.status in ['nova', 'em_analise', 'agendada', 'concluida'];
+    }
+
+    function validDonationPledge(docId) {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+          'id', 'protocol', 'donorName', 'donorEmail', 'userId',
+          'amount', 'purpose', 'date', 'message', 'status'
+        ])
+        && d.id == docId
+        && nonEmptyStr(d.protocol, 40)
+        && nonEmptyStr(d.donorName, 120)
+        && optStr(d, 'donorEmail', 200)
+        && optStr(d, 'userId', 128)
+        && d.amount is number && d.amount > 0 && d.amount <= 1000000
+        && nonEmptyStr(d.purpose, 200)
+        && nonEmptyStr(d.date, 60)
+        && optStr(d, 'message', 500)
+        && d.status in ['registrado', 'confirmado'];
+    }
+
+    function validVolunteerApplication(docId) {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+          'id', 'protocol', 'name', 'area', 'availability',
+          'experience', 'contactInfo', 'motivation', 'createdAt', 'status'
+        ])
+        && d.id == docId
+        && nonEmptyStr(d.protocol, 40)
+        && nonEmptyStr(d.name, 120)
+        && d.area in [
+          'Educação Física & Esporte',
+          'Saúde, Fisio & Nutrição',
+          'Psicologia & Serviço Social',
+          'Comunicação, Foto & Mídia',
+          'Apoio em Eventos & Logística',
+          'Mentoria & Educação'
+        ]
+        && nonEmptyStr(d.availability, 120)
+        && nonEmptyStr(d.experience, 2000)
+        && nonEmptyStr(d.contactInfo, 200)
+        && nonEmptyStr(d.motivation, 2000)
+        && nonEmptyStr(d.createdAt, 60)
+        && d.status in ['novo', 'em_analise', 'ativo'];
+    }
+
+    function validAttendanceSession(docId) {
+      let d = request.resource.data;
+      return d.id == docId
+        && nonEmptyStr(d.projectId, 120)
+        && nonEmptyStr(d.projectName, 200)
+        && nonEmptyStr(d.date, 40)
+        && nonEmptyStr(d.classTopic, 300)
+        && nonEmptyStr(d.coordinator, 120)
+        && d.entries is list && d.entries.size() <= 500
+        && nonEmptyStr(d.createdAt, 60);
+    }
+
+    function validAdminProfile() {
+      let d = request.resource.data;
+      return nonEmptyStr(d.email, 200)
+        && nonEmptyStr(d.nome, 150)
+        && d.role in [
+          'super_admin', 'admin', 'editor', 'professor',
+          'financeiro', 'parceiro', 'apoiador', 'visitante'
+        ]
+        && d.projectIds is list && d.projectIds.size() <= 50
+        && d.ativo is bool
+        && nonEmptyStr(d.criadoEm, 60)
+        && nonEmptyStr(d.criadoPor, 200);
+    }
+
+    function validInviteMatches(email) {
+      return exists(/databases/$(database)/documents/admin_invites/$(email))
+        && request.resource.data.role == get(/databases/$(database)/documents/admin_invites/$(email)).data.role
+        && request.resource.data.projectIds == get(/databases/$(database)/documents/admin_invites/$(email)).data.projectIds
+        && request.resource.data.ativo == true;
+    }
+
+    function validAuditLog(docId) {
+      let d = request.resource.data;
+      return d.id == docId
+        && nonEmptyStr(d.action, 120)
+        && nonEmptyStr(d.adminEmail, 200)
+        && nonEmptyStr(d.timestamp, 60)
+        && optStr(d, 'role', 60)
+        && optStr(d, 'collection', 100)
+        && optStr(d, 'itemId', 120)
+        && optStr(d, 'beforeSummary', 2000)
+        && optStr(d, 'afterSummary', 2000)
+        && optStr(d, 'details', 2000);
+    }
+
+    // 1. Perfis de Acesso (/admins/{uid}) e Convites (/admin_invites/{email})
+    match /admins/{uid} {
+      allow read: if (request.auth != null && request.auth.uid == uid)
+        || hasRole(['super_admin', 'admin', 'financeiro']);
+
+      allow create: if validAdminProfile() && (
+        hasRole(['super_admin'])
+        || (hasRole(['admin']) && request.resource.data.role != 'super_admin')
+        || (
+          request.auth != null
+          && request.auth.uid == uid
+          && request.auth.token.email == request.resource.data.email
+          && (
+            (isPrimarySuperAdmin() && request.resource.data.role == 'super_admin' && request.resource.data.ativo == true)
+            || (request.auth.token.email_verified == true && validInviteMatches(request.auth.token.email))
+            || (request.resource.data.role == 'visitante' && request.resource.data.ativo == true && request.resource.data.projectIds.size() == 0)
+          )
+        )
+      );
+
+      allow update: if validAdminProfile() && (
+        hasRole(['super_admin'])
+        || (
+          hasRole(['admin'])
+          && resource.data.role != 'super_admin'
+          && request.resource.data.role != 'super_admin'
+        )
+        || (
+          hasRole(['financeiro'])
+          && resource.data.role == 'visitante'
+          && request.resource.data.role == 'apoiador'
+          && request.resource.data.ativo == resource.data.ativo
+        )
+        || (
+          request.auth != null
+          && request.auth.uid == uid
+          && resource.data.ativo == true
+          && request.resource.data.ativo == true
+          && resource.data.role == 'visitante'
+          && request.resource.data.role == 'apoiador'
+          && request.resource.data.projectIds == resource.data.projectIds
+        )
+      );
+
+      allow delete: if hasRole(['super_admin']);
+    }
+
+    match /admin_invites/{email} {
+      allow read: if hasRole(['super_admin', 'admin'])
+        || (request.auth != null && request.auth.token.email == email);
+      allow create, update: if hasRole(['super_admin'])
+        || (hasRole(['admin']) && request.resource.data.role != 'super_admin');
+      allow delete: if hasRole(['super_admin', 'admin'])
+        || (request.auth != null && request.auth.token.email == email);
+    }
+
+    // 2. Coleções Públicas
+    match /club_info/{docId} {
+      allow read: if true;
+      allow create, update: if hasRole(['super_admin', 'admin', 'editor']) && validClubInfo();
+      allow delete: if hasRole(['super_admin', 'admin']);
+    }
+
+    match /site_settings/{docId} {
+      allow read: if true;
+      allow create, update: if hasRole(['super_admin', 'admin', 'editor']) && validSiteSettings();
+      allow delete: if hasRole(['super_admin', 'admin']);
+    }
+
+    match /news_articles/{docId} {
+      allow read: if true;
+      allow create, update: if hasRole(['super_admin', 'admin', 'editor']) && validNewsArticle(docId);
+      allow delete: if hasRole(['super_admin', 'admin', 'editor']);
+    }
+
+    match /sponsors/{docId} {
+      allow read: if true;
+      allow create, update: if hasRole(['super_admin', 'admin', 'editor', 'parceiro']) && validSponsor(docId);
+      allow delete: if hasRole(['super_admin', 'admin', 'editor']);
+    }
+
+    match /events/{docId} {
+      allow read: if true;
+      allow create, update: if hasRole(['super_admin', 'admin', 'editor']) && validEvent(docId);
+      allow delete: if hasRole(['super_admin', 'admin', 'editor']);
+    }
+
+    match /projects/{docId} {
+      allow read: if true;
+      allow create: if hasRole(['super_admin', 'admin', 'editor']) && validProject(docId);
+      allow update: if (hasRole(['super_admin', 'admin', 'editor']) || teachesProject(docId)) && validProject(docId);
+      allow delete: if hasRole(['super_admin', 'admin']);
+    }
+
+    match /gallery_albums/{docId} {
+      allow read: if true;
+      allow create, update, delete: if hasRole(['super_admin', 'admin', 'editor']) && (request.method == 'delete' || validGalleryAlbum(docId));
+    }
+
+    match /transparency_docs/{docId} {
+      allow read: if true;
+      allow create, update: if hasRole(['super_admin', 'admin']) && validTransparencyDoc(docId);
+      allow delete: if hasRole(['super_admin', 'admin']);
+    }
+
+    match /facility_polos/{docId} {
+      allow read: if true;
+      allow create, update: if hasRole(['super_admin', 'admin', 'editor']) && validFacilityPolo(docId);
+      allow delete: if hasRole(['super_admin', 'admin']);
+    }
+
+    // 3. Coleções Privadas e Sensíveis (LGPD)
+    match /participant_private/{docId} {
+      allow read: if hasRole(['super_admin', 'admin'])
+        || (resource != null && teachesProject(resource.data.projectId));
+      allow create, update: if (
+          hasRole(['super_admin', 'admin'])
+          || teachesProject(request.resource.data.projectId)
+        ) && validParticipantPrivate(docId);
+      allow delete: if hasRole(['super_admin', 'admin']);
+    }
+
+    match /rsvps/{docId} {
+      allow create: if validRsvp(docId);
+      allow read: if hasRole(['super_admin', 'admin'])
+        || (resource != null && ('projectId' in resource.data) && resource.data.projectId is string && teachesProject(resource.data.projectId))
+        || (
+          request.auth != null && resource != null && (
+            (('userId' in resource.data) && resource.data.userId == request.auth.uid)
+            || (('email' in resource.data) && resource.data.email == request.auth.token.email)
+          )
+        );
+      allow update: if (
+          hasRole(['super_admin', 'admin'])
+          || (resource != null && ('projectId' in resource.data) && resource.data.projectId is string && teachesProject(resource.data.projectId))
+        ) && validRsvp(docId);
+      allow delete: if hasRole(['super_admin', 'admin']);
+    }
+
+    match /contact_messages/{docId} {
+      allow create: if validContactMessage(docId);
+      allow read, delete: if hasRole(['super_admin', 'admin']);
+      allow update: if hasRole(['super_admin', 'admin']) && validContactMessage(docId);
+    }
+
+    match /scout_inquiries/{docId} {
+      allow create: if validScoutInquiry(docId);
+      allow read: if hasRole(['super_admin', 'admin', 'parceiro']);
+      allow update: if hasRole(['super_admin', 'admin']) && validScoutInquiry(docId);
+      allow delete: if hasRole(['super_admin', 'admin']);
+    }
+
+    match /donation_pledges/{docId} {
+      allow create: if validDonationPledge(docId);
+      allow read: if hasRole(['super_admin', 'admin', 'financeiro'])
+        || (
+          request.auth != null && resource != null && (
+            (('userId' in resource.data) && resource.data.userId == request.auth.uid)
+            || (('donorEmail' in resource.data) && resource.data.donorEmail == request.auth.token.email)
+          )
+        );
+      allow update: if hasRole(['super_admin', 'admin', 'financeiro']) && validDonationPledge(docId);
+      allow delete: if hasRole(['super_admin', 'admin']);
+    }
+
+    match /volunteer_applications/{docId} {
+      allow create: if validVolunteerApplication(docId);
+      allow read, delete: if hasRole(['super_admin', 'admin']);
+      allow update: if hasRole(['super_admin', 'admin']) && validVolunteerApplication(docId);
+    }
+
+    match /attendance_sessions/{docId} {
+      allow read: if hasRole(['super_admin', 'admin'])
+        || (resource != null && teachesProject(resource.data.projectId));
+      allow create, update: if (
+          hasRole(['super_admin', 'admin'])
+          || teachesProject(request.resource.data.projectId)
+        ) && validAttendanceSession(docId);
+      allow delete: if hasRole(['super_admin', 'admin']);
+    }
+
+    match /audit_logs/{docId} {
+      allow create: if isActive() && validAuditLog(docId);
+      allow read: if hasRole(['super_admin', 'admin']);
+      allow update, delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
-
-    // Helper functions
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    function isAdmin() {
-      return isSignedIn() && (
-        (request.auth.token.email == 'higor.rock2011@gmail.com' && request.auth.token.email_verified == true) ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
-    }
-
-    // Entity validations
-    function isValidClubInfo(data) {
-      return data.fullName is string && data.fullName.size() <= 200 &&
-             data.tradeName is string && data.tradeName.size() <= 100 &&
-             data.cnpj is string && data.cnpj.size() <= 30 &&
-             data.president is string && data.president.size() <= 100 &&
-             data.address is string && data.address.size() <= 300 &&
-             data.email is string && data.email.size() <= 120;
-    }
-
-    function isValidNews(data) {
-      return data.title is string && data.title.size() >= 3 && data.title.size() <= 200 &&
-             data.category is string && data.category.size() <= 60 &&
-             data.summary is string && data.summary.size() <= 500 &&
-             data.author is string && data.author.size() <= 100;
-    }
-
-    function isValidSponsor(data) {
-      return data.name is string && data.name.size() >= 2 && data.name.size() <= 150 &&
-             data.tier is string && (data.tier == 'master' || data.tier == 'ouro' || data.tier == 'prata' || data.tier == 'bronze' || data.tier == 'apoio') &&
-             data.logoUrl is string && data.logoUrl.size() <= 2000 &&
-             data.active is bool;
-    }
-
-    function isValidEvent(data) {
-      return data.title is string && data.title.size() >= 3 && data.title.size() <= 200 &&
-             data.category is string && data.category.size() <= 60 &&
-             data.location is string && data.location.size() <= 200 &&
-             data.capacity is number && data.capacity >= 1 &&
-             data.availableSpots is number && data.availableSpots >= 0;
-    }
-
-    function isValidProject(data) {
-      return data.name is string && data.name.size() >= 3 && data.name.size() <= 200 &&
-             data.category is string && data.category.size() <= 60 &&
-             data.targetAudience is string && data.targetAudience.size() <= 150 &&
-             data.description is string && data.description.size() <= 2000;
-    }
-
-    function isValidAlbum(data) {
-      return data.title is string && data.title.size() >= 3 && data.title.size() <= 200 &&
-             data.category is string && data.category.size() <= 60 &&
-             data.date is string && data.date.size() <= 60;
-    }
-
-    function isValidDoc(data) {
-      return data.title is string && data.title.size() >= 3 && data.title.size() <= 200 &&
-             data.category is string && data.category.size() <= 60 &&
-             data.fileType is string && data.fileType.size() <= 20;
-    }
-
-    function isValidRsvp(data) {
-      return data.eventId is string && data.eventId.size() <= 128 &&
-             data.eventTitle is string && data.eventTitle.size() <= 200 &&
-             data.name is string && data.name.size() >= 2 && data.name.size() <= 150 &&
-             data.phone is string && data.phone.size() >= 8 && data.phone.size() <= 40 &&
-             data.spots is number && data.spots >= 1 && data.spots <= 10 &&
-             data.confirmationCode is string && data.confirmationCode.size() <= 50;
-    }
-
-    function isValidMessage(data) {
-      return data.name is string && data.name.size() >= 2 && data.name.size() <= 150 &&
-             data.email is string && data.email.size() <= 120 &&
-             data.phone is string && data.phone.size() <= 40 &&
-             data.subject is string && data.subject.size() <= 120 &&
-             data.message is string && data.message.size() >= 3 && data.message.size() <= 3000;
-    }
-
-    function isValidSiteSettings(data) {
-      return data.newsCategories is list &&
-             data.siteTags is list &&
-             data.seoTitle is string && data.seoTitle.size() <= 200;
-    }
-
-    function isValidPolo(data) {
-      return data.name is string && data.name.size() >= 2 && data.name.size() <= 200;
-    }
-
-    function isValidScoutInquiry(data) {
-      return data.scoutName is string && data.scoutName.size() >= 2 && data.scoutName.size() <= 150 &&
-             data.organization is string && data.organization.size() <= 150 &&
-             data.role is string && data.role.size() <= 100 &&
-             data.phone is string && data.phone.size() <= 40 &&
-             data.email is string && data.email.size() <= 120 &&
-             data.inquiryType in ['avaliacao_clube', 'visita_treino', 'relatorio_atleta', 'parceria_base'] &&
-             data.targetCategory is string && data.targetCategory.size() <= 100 &&
-             data.message is string && data.message.size() <= 3000 &&
-             data.protocol is string && data.protocol.size() <= 50 &&
-             data.createdAt is string && data.createdAt.size() <= 60 &&
-             data.status == 'nova';
-    }
-
-    function isValidPledge(data) {
-      return data.donorName is string && data.donorName.size() >= 1 && data.donorName.size() <= 150 &&
-             data.amount is number && data.amount > 0 && data.amount <= 1000000 &&
-             data.purpose is string && data.purpose.size() <= 150 &&
-             data.date is string && data.date.size() <= 60 &&
-             data.protocol is string && data.protocol.size() <= 50 &&
-             (!('message' in data) || (data.message is string && data.message.size() <= 1000)) &&
-             data.status == 'registrado';
-    }
-
-    function isValidVolunteer(data) {
-      return data.name is string && data.name.size() >= 2 && data.name.size() <= 150 &&
-             data.area is string && data.area.size() <= 80 &&
-             data.availability is string && data.availability.size() <= 300 &&
-             data.experience is string && data.experience.size() <= 2000 &&
-             data.contactInfo is string && data.contactInfo.size() <= 300 &&
-             data.motivation is string && data.motivation.size() <= 3000 &&
-             data.protocol is string && data.protocol.size() <= 50 &&
-             data.createdAt is string && data.createdAt.size() <= 60 &&
-             data.status == 'novo';
-    }
-
-    // 1. Institutional Club Info
-    match /club_info/{infoId} {
-      allow get, list: if true;
-      allow create, update: if isAdmin() && isValidId(infoId) && isValidClubInfo(incoming());
-      allow delete: if isAdmin() && isValidId(infoId);
-    }
-
-    // 1b. Site Settings (Categories, Tags, Banners, SEO)
-    match /site_settings/{settingId} {
-      allow get, list: if true;
-      allow create, update: if isAdmin() && isValidId(settingId) && isValidSiteSettings(incoming());
-      allow delete: if isAdmin() && isValidId(settingId);
-    }
-
-    // 2. News Articles
-    match /news_articles/{articleId} {
-      allow get, list: if true;
-      allow create, update: if isAdmin() && isValidId(articleId) && isValidNews(incoming());
-      allow delete: if isAdmin() && isValidId(articleId);
-    }
-
-    // 2b. Sponsors & Partners
-    match /sponsors/{sponsorId} {
-      allow get, list: if true;
-      allow create, update: if isAdmin() && isValidId(sponsorId) && isValidSponsor(incoming());
-      allow delete: if isAdmin() && isValidId(sponsorId);
-    }
-
-    // 3. Events & Clinics
-    match /events/{eventId} {
-      allow get, list: if true;
-      allow create, update: if isAdmin() && isValidId(eventId) && isValidEvent(incoming());
-      allow delete: if isAdmin() && isValidId(eventId);
-    }
-
-    // 4. Projects
-    match /projects/{projectId} {
-      allow get, list: if true;
-      allow create, update: if isAdmin() && isValidId(projectId) && isValidProject(incoming());
-      allow delete: if isAdmin() && isValidId(projectId);
-    }
-
-    // 5. Gallery Albums
-    match /gallery_albums/{albumId} {
-      allow get, list: if true;
-      allow create, update: if isAdmin() && isValidId(albumId) && isValidAlbum(incoming());
-      allow delete: if isAdmin() && isValidId(albumId);
-    }
-
-    // 6. Transparency Documents
-    match /transparency_docs/{docId} {
-      allow get, list: if true;
-      allow create, update: if isAdmin() && isValidId(docId) && isValidDoc(incoming());
-      allow delete: if isAdmin() && isValidId(docId);
-    }
-
-    // 6b. Facility Polos (spaces shown on the site)
-    match /facility_polos/{poloId} {
-      allow get, list: if true;
-      allow create, update: if isAdmin() && isValidId(poloId) && isValidPolo(incoming());
-      allow delete: if isAdmin() && isValidId(poloId);
-    }
-
-    // 7. RSVPs and Registrations
-    match /rsvps/{rsvpId} {
-      allow create: if isValidId(rsvpId) && (isAdmin() || isValidRsvp(incoming()));
-      allow get, list, update, delete: if isAdmin();
-    }
-
-    // 8. Contact & Ombudsman Messages
-    match /contact_messages/{messageId} {
-      allow create: if isValidId(messageId) && (isAdmin() || isValidMessage(incoming()));
-      allow get, list, update, delete: if isAdmin();
-    }
-
-    // 8b. Scout / Talent Inquiries
-    match /scout_inquiries/{inquiryId} {
-      allow create: if isValidId(inquiryId) && (isAdmin() || isValidScoutInquiry(incoming()));
-      allow get, list, update, delete: if isAdmin();
-    }
-
-    // 8c. PIX Donation Pledges (donor names and amounts stay private)
-    match /donation_pledges/{pledgeId} {
-      allow create: if isValidId(pledgeId) && (isAdmin() || isValidPledge(incoming()));
-      allow get, list, update, delete: if isAdmin();
-    }
-
-    // 8d. Volunteer Applications (contact details stay private)
-    match /volunteer_applications/{applicationId} {
-      allow create: if isValidId(applicationId) && (isAdmin() || isValidVolunteer(incoming()));
-      allow get, list, update, delete: if isAdmin();
-    }
-
-    // 8e. Project Attendance Sessions (minors' attendance, admin only)
-    match /attendance_sessions/{sessionId} {
-      allow get, list: if isAdmin();
-      allow create, update, delete: if isAdmin() && isValidId(sessionId);
-    }
-
-    // 9. Audit Logs
-    match /audit_logs/{logId} {
-      allow get, list, create, update, delete: if isAdmin() && isValidId(logId);
-    }
-
-    // 10. Admins List
-    match /admins/{adminId} {
-      allow get, list, create, update, delete: if isAdmin() && isValidId(adminId);
-    }
   }
 }
+
+// =========================================================================================
+// TABELA DE PERMISSÕES: PERFIL × COLEÇÃO × PERMISSÃO
+// =========================================================================================
+// Coleção                 | público ( s/ login ) | visitante | apoiador  | parceiro  | financeiro| professor           | editor    | admin     | super_admin
+// ------------------------+----------------------+-----------+-----------+-----------+-----------+---------------------+-----------+-----------+------------
+// club_info               | ler                  | ler       | ler       | ler       | ler       | ler                 | ler/gravar| ler/gravar| total
+// site_settings           | ler                  | ler       | ler       | ler       | ler (PIX) | ler                 | ler/gravar| ler/gravar| total
+// news_articles           | ler                  | ler       | ler       | ler       | ler       | ler                 | total     | total     | total
+// events                  | ler                  | ler       | ler       | ler       | ler       | ler                 | total     | total     | total
+// gallery_albums          | ler                  | ler       | ler       | ler       | ler       | ler                 | total     | total     | total
+// sponsors                | ler                  | ler       | ler       | ler/editar| ler       | ler                 | total     | total     | total
+// facility_polos          | ler                  | ler       | ler       | ler       | ler       | ler                 | ler/gravar| total     | total
+// transparency_docs       | ler                  | ler       | ler       | ler       | ler/conf. | ler                 | ler       | total     | total
+// projects                | ler                  | ler       | ler       | ler       | ler       | ler/editar (turmas) | ler/gravar| total     | total
+// participant_private     | -                    | -         | -         | -         | -         | ler/gravar (turmas) | -         | total     | total
+// attendance_sessions     | -                    | -         | -         | -         | -         | ler/gravar (turmas) | -         | total     | total
+// rsvps (inscrições)      | criar                | criar/próp| criar/próp| criar     | -         | ler/editar (turmas) | -         | total     | total
+// contact_messages        | criar                | criar     | criar     | criar     | -         | -                   | -         | total     | total
+// scout_inquiries         | criar                | criar     | criar     | criar/ler | -         | -                   | -         | total     | total
+// donation_pledges        | criar                | criar/próp| criar/próp| criar     | ler/conf. | -                   | -         | total     | total
+// volunteer_applications  | criar                | criar     | criar     | criar     | -         | -                   | -         | total     | total
+// admins                  | -                    | próp.     | próp.     | próp.     | prom.apoi.| próp.               | próp.     | exc.super | total
+// admin_invites           | -                    | ler próp. | ler próp. | ler próp. | ler próp. | ler próp.           | ler próp. | exc.super | total
+// audit_logs              | -                    | criar     | criar     | criar     | criar     | criar               | criar     | ler/criar | ler/criar
+// =========================================================================================

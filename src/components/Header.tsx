@@ -6,6 +6,7 @@ import {
   Lock,
   ArrowUpRight,
 } from 'lucide-react';
+import { useClubData } from '../context/ClubDataContext.tsx';
 
 interface HeaderProps {
   onOpenSearch: () => void;
@@ -34,6 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAdmin,
   activePageId = 'home',
 }) => {
+  const { currentUserProfile } = useClubData();
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -116,12 +118,16 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={onOpenAdmin}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-sky-200 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
-              title="Painel Administrativo"
-              aria-label="Painel Administrativo"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-sky-100 bg-white/10 hover:bg-white/20 hover:text-white rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              title="Entrar / Painel Administrativo"
+              aria-label="Entrar / Painel Administrativo"
             >
               <Lock className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
-              <span className="hidden 2xl:inline">Admin</span>
+              <span>
+                {currentUserProfile
+                  ? `Painel (${currentUserProfile.nome.split(' ')[0]})`
+                  : 'Entrar'}
+              </span>
             </button>
           )}
 

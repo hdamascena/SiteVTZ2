@@ -447,81 +447,62 @@ export const PlayerScoutModal: React.FC<PlayerScoutModalProps> = ({
               </div>
             )}
 
-            {/* TAB 4: Bio, School & Anthropometrics */}
+            {/* TAB 4: Public Athletic Profile (LGPD Protected) */}
             {activeTab === 'bio' && (
               <div className="space-y-6 animate-in fade-in duration-150">
-                {/* School Information */}
                 <div className="p-5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-3">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
                     <GraduationCap className="w-4 h-4" />
-                    <span>Conformidade Escolar Obrigatória (Exigência Vitalizar)</span>
+                    <span>Conformidade Pedagógica & Proteção de Dados (LGPD)</span>
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Em cumprimento à Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018) e ao Estatuto da Criança e do Adolescente, dados escolares nominais, data de nascimento e medidas antropométricas são restritos à coordenação pedagógica.
+                  </p>
+                  <div className="p-3 bg-slate-900 rounded-xl border border-emerald-500/40 flex items-center justify-between">
+                    <div>
                       <span className="text-slate-400 block text-[10px] uppercase font-bold">
-                        Unidade Escolar
+                        Situação no Projeto Social
                       </span>
-                      <span className="text-white font-semibold mt-0.5 block">
-                        {player.schoolInfo.schoolName}
-                      </span>
-                    </div>
-
-                    <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
-                      <span className="text-slate-400 block text-[10px] uppercase font-bold">
-                        Série & Turno
-                      </span>
-                      <span className="text-white font-semibold mt-0.5 block">
-                        {player.schoolInfo.grade} ({player.schoolInfo.turn})
+                      <span className="text-emerald-300 font-extrabold text-sm mt-0.5 block">
+                        Frequência Escolar Regular Comprovada
                       </span>
                     </div>
-
-                    <div className="p-3 bg-slate-900 rounded-xl border border-emerald-500/40 col-span-1 sm:col-span-2 flex items-center justify-between">
-                      <div>
-                        <span className="text-slate-400 block text-[10px] uppercase font-bold">
-                          Frequência Escolar Comprovada
-                        </span>
-                        <span className="text-emerald-300 font-extrabold text-sm mt-0.5 block">
-                          {player.schoolInfo.attendanceRate} de Assiduidade
-                        </span>
-                      </div>
-                      <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[10px] font-bold rounded-lg uppercase">
-                        Apto & Regular
-                      </span>
-                    </div>
+                    <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[10px] font-bold rounded-lg uppercase">
+                      Apto & Regular
+                    </span>
                   </div>
                 </div>
 
-                {/* Anthropometrics & Profile Details */}
                 <div className="p-5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-3">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-sky-400 flex items-center gap-1.5">
-                    <Ruler className="w-4 h-4" />
-                    <span>Dados Biométricos & Físicos</span>
+                    <Shield className="w-4 h-4" />
+                    <span>Ficha Esportiva Pública</span>
                   </h4>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                     <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
                       <span className="text-slate-400 block text-[10px] uppercase font-bold">
-                        Idade / Nasc.
+                        Categoria
                       </span>
                       <span className="text-white font-semibold mt-0.5 block">
-                        {player.age} anos ({player.birthDate})
+                        {player.category}
                       </span>
                     </div>
 
                     <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
                       <span className="text-slate-400 block text-[10px] uppercase font-bold">
-                        Altura / Estatura
+                        Posição Principal
                       </span>
                       <span className="text-white font-semibold mt-0.5 block">
-                        {player.height}
+                        {player.position}
                       </span>
                     </div>
 
                     <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
                       <span className="text-slate-400 block text-[10px] uppercase font-bold">
-                        Peso Corporal
+                        Setor Tático
                       </span>
-                      <span className="text-white font-semibold mt-0.5 block">
-                        {player.weight}
+                      <span className="text-white font-semibold mt-0.5 block uppercase">
+                        {player.positionGroup}
                       </span>
                     </div>
 
@@ -536,19 +517,19 @@ export const PlayerScoutModal: React.FC<PlayerScoutModalProps> = ({
 
                     <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
                       <span className="text-slate-400 block text-[10px] uppercase font-bold">
-                        Categoria
+                        Camisa Oficial
                       </span>
-                      <span className="text-white font-semibold mt-0.5 block">
-                        {player.category}
+                      <span className="text-white font-semibold mt-0.5 block font-mono">
+                        #{player.jerseyNumber}
                       </span>
                     </div>
 
                     <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
                       <span className="text-slate-400 block text-[10px] uppercase font-bold">
-                        Setor Tático
+                        Índice Técnico (OVR)
                       </span>
-                      <span className="text-white font-semibold mt-0.5 block uppercase">
-                        {player.positionGroup}
+                      <span className="text-amber-400 font-extrabold mt-0.5 block font-mono">
+                        {player.stats.overall}
                       </span>
                     </div>
                   </div>

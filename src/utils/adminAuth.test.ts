@@ -39,3 +39,43 @@ test('validateBackupSchema validates JSON structure', () => {
   assert.strictEqual(invalid.valid, false);
   assert.ok(invalid.errors.length > 0);
 });
+
+import {
+  canAccessSection,
+  canExportSensitiveCsv,
+  maskPhone,
+  maskEmail,
+  splitParticipantPublicAndPrivate,
+} from '../admin/permissions.ts';
+
+test('RBAC permissions and LGPD masking', () => {
+  assert.strictEqual(canExportSensitiveCsv('super_admin'), true);
+  assert.strictEqual(canExportSensitiveCsv('admin'), true);
+  assert.strictEqual(canExportSensitiveCsv('professor'), false);
+  assert.strictEqual(canExportSensitiveCsv('editor'), false);
+  assert.strictEqual(canAccessSection('professor', 'chamada'), true);
+  assert.strictEqual(canAccessSection('professor', 'usuarios'), false);
+  assert.strictEqual(canAccessSection('apoiador', 'inscricoes'), true);
+
+  assert.strictEqual(maskPhone('(27) 99823-1144'), '(27) *****-1144');
+  assert.strictEqual(maskEmail('joao.silva@gmail.com'), 'jo***@gmail.com');
+
+  const sample: any = {
+    id: 'p-1',
+    name: 'Atleta Teste',
+    birthDate: '2012-05-10',
+    weight: '52kg',
+    height: '1,62m',
+    bmi: '19.8',
+    nextfitCode: 'NF-100',
+    schoolInfo: { schoolName: 'EMEF Cariacica', grade: '8º ano', turn: 'Matutino', attendanceRate: '98%' },
+  };
+  const { publicParticipant, privateRecord } = splitParticipantPublicAndPrivate(sample, 'proj-1');
+  assert.strictEqual(publicParticipant.birthDate, '');
+  assert.strictEqual(publicParticipant.weight, '');
+  assert.strictEqual(publicParticipant.schoolInfo.schoolName, '');
+  assert.strictEqual(privateRecord.birthDate, '2012-05-10');
+  assert.strictEqual(privateRecord.weight, '52kg');
+  assert.strictEqual(privateRecord.schoolInfo?.schoolName, 'EMEF Cariacica');
+});
+

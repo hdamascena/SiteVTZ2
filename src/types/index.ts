@@ -50,6 +50,7 @@ export interface NewsArticle {
   views?: number;
   tags?: string[];
   attachments?: AttachedFile[];
+  status?: 'publicado' | 'rascunho';
 }
 
 export interface GalleryItem {
@@ -388,6 +389,8 @@ export interface DonationPledgeRecord {
   id: string;
   protocol: string;
   donorName: string;
+  donorEmail?: string;
+  userId?: string;
   amount: number;
   purpose: string;
   date: string;

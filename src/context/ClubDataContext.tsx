@@ -31,6 +31,16 @@ import type { AuditLogEntry } from '../utils/adminAuth.ts';
 import { db, auth } from '../firebase.ts';
 import { doc, getDoc, getDocs, collection, setDoc, deleteDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
+import type {
+  AdminUserProfile,
+  ParticipantPrivateRecord,
+  ProjectEnrollmentStatus,
+} from '../admin/types.ts';
+import { splitParticipantPublicAndPrivate } from '../admin/permissions.ts';
+import {
+  promoteVisitorToSupporter,
+  verifyFirebaseAdminAccess,
+} from '../services/firebaseService.ts';
 
 export const INITIAL_GALLERY_ALBUMS: PastEventPhoto[] = [
   {
@@ -135,6 +145,13 @@ export interface EventRsvpRecord {
   spots: number;
   date: string;
   confirmationCode: string;
+  projectId?: string;
+  enrollmentStatus?: ProjectEnrollmentStatus;
+  studentName?: string;
+  studentAge?: number;
+  responsibleName?: string;
+  modalityOrClass?: string;
+  userId?: string;
 }
 
 export interface ContactMessageRecord {
@@ -155,6 +172,9 @@ export interface ToastNotification {
 }
 
 interface ClubDataContextType {
+  currentUserProfile: AdminUserProfile | null;
+  authLoading: boolean;
+  refreshUserProfile: () => Promise<void>;
   clubInfo: typeof CLUB_INFO;
   siteSettings: SiteSettings;
   addDonationPledge: (pledge: DonationPledgeRecord) => void;
@@ -164,6 +184,8 @@ interface ClubDataContextType {
   rsvps: EventRsvpRecord[];
   addRsvp: (rsvp: Omit<EventRsvpRecord, 'id' | 'confirmationCode' | 'date'>) => string;
   projects: VitalizarProject[];
+  participantPrivateMap: Record<string, ParticipantPrivateRecord>;
+  saveParticipantPrivate: (record: ParticipantPrivateRecord) => Promise<void>;
   galleryAlbums: PastEventPhoto[];
   transparencyDocs: TransparencyDocument[];
   sponsors: Sponsor[];
@@ -174,6 +196,15 @@ interface ClubDataContextType {
   addContactMessage: (msg: Omit<ContactMessageRecord, 'id' | 'date' | 'read'>) => void;
   auditLogs: AuditLogEntry[];
   addAuditLog: (action: string, details?: string, adminEmail?: string) => void;
+  recordAuditEvent: (params: {
+    action: string;
+    collection: string;
+    itemId: string;
+    beforeSummary?: string;
+    afterSummary?: string;
+    details?: string;
+    role?: string;
+  }) => void;
   clearAuditLogs: () => void;
   resetAllToDefaults: () => void;
   exportDatabaseJson: () => string;
@@ -193,7 +224,7 @@ interface ClubDataContextType {
     contactMessages?: ContactMessageRecord[];
     logDetails?: string;
     toastMessage?: string;
-  }) => boolean;
+  }, logMessage?: string) => boolean;
   toasts: ToastNotification[];
   showToast: (message: string, type?: 'success' | 'info' | 'error') => void;
   removeToast: (id: string) => void;
@@ -207,6 +238,7 @@ const STORAGE_KEYS = {
   SPONSORS: 'vitalizar_db_sponsors',
   EVENTS: 'vitalizar_db_events',
   PROJECTS: 'vitalizar_db_projects',
+  PARTICIPANT_PRIVATE: 'vitalizar_db_participant_private',
   GALLERY: 'vitalizar_db_gallery',
   TRANSPARENCY: 'vitalizar_db_transparency',
   POLOS: 'vitalizar_db_polos',
@@ -891,9 +923,43 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   });
 
+  const [participantPrivateMap, setParticipantPrivateMap] = useState<
+    Record<string, ParticipantPrivateRecord>
+  >(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.PARTICIPANT_PRIVATE);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    const seedMap: Record<string, ParticipantPrivateRecord> = {};
+    VITALIZAR_PROJECTS.forEach((pr) => {
+      (pr.participants || []).forEach((pt) => {
+        const { privateRecord } = splitParticipantPublicAndPrivate(pt, pr.id);
+        seedMap[pt.id] = privateRecord;
+      });
+    });
+    return seedMap;
+  });
+
   const [isFirebaseActive, setIsFirebaseActive] = useState<boolean>(true);
+  const [currentUserProfile, setCurrentUserProfile] =
+    useState<AdminUserProfile | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
   // Set once an admin has loaded the private settings lists, so the public doc never overwrites them
   const privateSettingsLoaded = useRef(false);
+
+  const refreshUserProfile = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      setCurrentUserProfile(null);
+      setAuthLoading(false);
+      return;
+    }
+    const res = await verifyFirebaseAdminAccess(user);
+    setCurrentUserProfile(res.profile || null);
+    setAuthLoading(false);
+  };
 
   // Sync initial data from Firestore if available (Batched in a single render pass)
   useEffect(() => {
@@ -1021,14 +1087,33 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Admin-only records (visitor submissions and private lists): the rules deny these reads to anyone else
   useEffect(() => {
     return onAuthStateChanged(auth, async (user) => {
-      if (!user) return;
-      const [rsvpRes, msgRes, scoutRes, pledgeRes, volRes, attendanceRes] = await Promise.allSettled([
+      if (!user) {
+        setCurrentUserProfile(null);
+        setAuthLoading(false);
+        return;
+      }
+      setAuthLoading(true);
+      const accessRes = await verifyFirebaseAdminAccess(user);
+      setCurrentUserProfile(accessRes.profile || null);
+      setAuthLoading(false);
+      const [
+        rsvpRes,
+        msgRes,
+        scoutRes,
+        pledgeRes,
+        volRes,
+        attendanceRes,
+        partPrivRes,
+        logsRes,
+      ] = await Promise.allSettled([
         getDocs(collection(db, 'rsvps')),
         getDocs(collection(db, 'contact_messages')),
         getDocs(collection(db, 'scout_inquiries')),
         getDocs(collection(db, PRIVATE_SETTINGS_COLLECTIONS.donationPledges)),
         getDocs(collection(db, PRIVATE_SETTINGS_COLLECTIONS.volunteers)),
         getDocs(collection(db, PRIVATE_SETTINGS_COLLECTIONS.attendanceSessions)),
+        getDocs(collection(db, 'participant_private')),
+        getDocs(collection(db, 'audit_logs')),
       ]);
 
       if (rsvpRes.status === 'fulfilled') {
@@ -1052,6 +1137,26 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setScoutInquiries((prev) => {
           const updated = mergeRemoteFirst(remote, prev);
           localStorage.setItem(STORAGE_KEYS.SCOUT_INQUIRIES, JSON.stringify(updated));
+          return updated;
+        });
+      }
+      if (partPrivRes.status === 'fulfilled' && !partPrivRes.value.empty) {
+        setParticipantPrivateMap((prev) => {
+          const next = { ...prev };
+          partPrivRes.value.docs.forEach((d) => {
+            const rec = d.data() as ParticipantPrivateRecord;
+            next[rec.id || d.id] = rec;
+          });
+          localStorage.setItem(STORAGE_KEYS.PARTICIPANT_PRIVATE, JSON.stringify(next));
+          return next;
+        });
+      }
+      if (logsRes.status === 'fulfilled' && !logsRes.value.empty) {
+        const remoteLogs = logsRes.value.docs.map((d) => d.data() as AuditLogEntry);
+        remoteLogs.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        setAuditLogs((prev) => {
+          const updated = mergeRemoteFirst(remoteLogs, prev).slice(0, 200);
+          localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(updated));
           return updated;
         });
       }
@@ -1099,13 +1204,59 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  const addAuditLog = (action: string, details?: string, adminEmail: string = 'admin@vitalizar.org.br') => {
-    const entry = createAuditLogEntry(action, adminEmail, details);
+  const addAuditLog = (action: string, details?: string, adminEmail?: string) => {
+    const email = adminEmail || auth.currentUser?.email || 'sistema@vitalizar.org.br';
+    const entry = createAuditLogEntry(action, email, details);
     setAuditLogs((prev) => {
-      const updated = [entry, ...prev].slice(0, 50);
+      const updated = [entry, ...prev].slice(0, 200);
       localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(updated));
       return updated;
     });
+    if (auth.currentUser) {
+      setDoc(doc(db, 'audit_logs', entry.id), sanitizeForFirestore(entry)).catch(() => {});
+    }
+  };
+
+  const recordAuditEvent = (params: {
+    action: string;
+    collection: string;
+    itemId: string;
+    beforeSummary?: string;
+    afterSummary?: string;
+    details?: string;
+    role?: string;
+  }) => {
+    const email = auth.currentUser?.email || 'admin@vitalizar.org.br';
+    const entry = createAuditLogEntry(
+      params.action,
+      email,
+      params.details || `${params.collection}/${params.itemId}`,
+      new Date().toISOString(),
+      {
+        role: params.role,
+        collection: params.collection,
+        itemId: params.itemId,
+        beforeSummary: params.beforeSummary,
+        afterSummary: params.afterSummary,
+      }
+    );
+    setAuditLogs((prev) => {
+      const updated = [entry, ...prev].slice(0, 200);
+      localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(updated));
+      return updated;
+    });
+    if (auth.currentUser) {
+      setDoc(doc(db, 'audit_logs', entry.id), sanitizeForFirestore(entry)).catch(() => {});
+    }
+  };
+
+  const saveParticipantPrivate = async (record: ParticipantPrivateRecord) => {
+    setParticipantPrivateMap((prev) => {
+      const next = { ...prev, [record.id]: record };
+      localStorage.setItem(STORAGE_KEYS.PARTICIPANT_PRIVATE, JSON.stringify(next));
+      return next;
+    });
+    await setDoc(doc(db, 'participant_private', record.id), sanitizeForFirestore(record));
   };
 
   // Visitor submissions: the admin only sees them if this write reaches Firestore, so tell the visitor when it fails
@@ -1122,12 +1273,23 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const addDonationPledge = (pledge: DonationPledgeRecord) => {
+    const enrichedPledge: DonationPledgeRecord = {
+      ...pledge,
+      ...(auth.currentUser?.uid ? { userId: auth.currentUser.uid } : {}),
+      ...(auth.currentUser?.email ? { donorEmail: auth.currentUser.email } : {}),
+    };
     setSiteSettingsState((prev) => {
-      const updated = { ...prev, donationPledges: [pledge, ...(prev.donationPledges || [])] };
+      const updated = {
+        ...prev,
+        donationPledges: [enrichedPledge, ...(prev.donationPledges || [])],
+      };
       localStorage.setItem(STORAGE_KEYS.SITE_SETTINGS, JSON.stringify(updated));
       return updated;
     });
-    submitRecord(PRIVATE_SETTINGS_COLLECTIONS.donationPledges, pledge);
+    submitRecord(PRIVATE_SETTINGS_COLLECTIONS.donationPledges, enrichedPledge);
+    if (auth.currentUser?.uid) {
+      promoteVisitorToSupporter(auth.currentUser.uid).catch(() => {});
+    }
   };
 
   const addVolunteerApplication = (application: VolunteerApplicationRecord) => {
@@ -1142,11 +1304,18 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // RSVPs
   const addRsvp = (rsvpData: Omit<EventRsvpRecord, 'id' | 'confirmationCode' | 'date'>): string => {
     const confirmationCode = `VTL-${rsvpData.eventId.toUpperCase().slice(0, 6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const isProjectEnrollment =
+      Boolean(rsvpData.projectId) || rsvpData.eventId.startsWith('inscricao-');
     const newRsvp: EventRsvpRecord = {
       ...rsvpData,
       id: `rsvp-${Date.now()}`,
       confirmationCode,
       date: new Date().toLocaleString('pt-BR'),
+      ...(isProjectEnrollment && !rsvpData.enrollmentStatus
+        ? { enrollmentStatus: 'pendente' }
+        : {}),
+      ...(auth.currentUser?.uid && !rsvpData.userId ? { userId: auth.currentUser.uid } : {}),
+      ...(auth.currentUser?.email && !rsvpData.email ? { email: auth.currentUser.email } : {}),
     };
 
     setRsvps((prev) => {
@@ -1378,7 +1547,7 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     contactMessages?: ContactMessageRecord[];
     logDetails?: string;
     toastMessage?: string;
-  }): boolean => {
+  }, logMessage?: string): boolean => {
     try {
       if (payload.clubInfo !== undefined) {
         const safeClub = normalizeClubInfo(payload.clubInfo);
@@ -1491,7 +1660,37 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         syncList('events', normalizeEvents(payload.events), events);
       }
       if (payload.projects !== undefined) {
-        syncList('projects', normalizeProjects(payload.projects), projects);
+        const normalized = normalizeProjects(payload.projects);
+        const nextPrivateMap: Record<string, ParticipantPrivateRecord> = {
+          ...participantPrivateMap,
+        };
+        const publicProjects = normalized.map((proj) => {
+          const publicParticipants = (proj.participants || []).map((pt) => {
+            const { publicParticipant, privateRecord } = splitParticipantPublicAndPrivate(
+              pt,
+              proj.id
+            );
+            const hasSensitive =
+              Boolean(pt.birthDate) ||
+              Boolean(pt.weight) ||
+              Boolean(pt.height) ||
+              Boolean(pt.bmi) ||
+              Boolean(pt.nextfitCode) ||
+              Boolean(pt.schoolInfo?.schoolName);
+            if (hasSensitive) {
+              nextPrivateMap[pt.id] = privateRecord;
+              put('participant_private', pt.id, privateRecord);
+            }
+            return publicParticipant;
+          });
+          return { ...proj, participants: publicParticipants };
+        });
+        setParticipantPrivateMap(nextPrivateMap);
+        localStorage.setItem(
+          STORAGE_KEYS.PARTICIPANT_PRIVATE,
+          JSON.stringify(nextPrivateMap)
+        );
+        syncList('projects', publicProjects, projects);
       }
       if (payload.galleryAlbums !== undefined) {
         syncList('gallery_albums', normalizeGalleryAlbums(payload.galleryAlbums), galleryAlbums);
@@ -1515,14 +1714,14 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       addAuditLog(
         'ALTERACOES_SALVAS',
-        payload.logDetails || 'Alterações administrativas salvas no banco de dados e publicadas no site.'
+        logMessage || payload.logDetails || 'Alterações administrativas salvas no banco de dados e publicadas no site.'
       );
       Promise.allSettled(writes).then((results) => {
         const failed = results.filter(
           (r): r is PromiseRejectedResult => r.status === 'rejected'
         );
         if (failed.length === 0) {
-          showToast(payload.toastMessage || 'Alterações salvas no Firestore e publicadas!');
+          showToast(payload.toastMessage || logMessage || 'Alterações salvas no Firestore e publicadas!');
           return;
         }
         console.warn('Firestore: falhas ao publicar alterações:', failed.map((f) => f.reason));
@@ -1545,6 +1744,9 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   return (
     <ClubDataContext.Provider
       value={{
+        currentUserProfile,
+        authLoading,
+        refreshUserProfile,
         clubInfo,
         siteSettings,
         addDonationPledge,
@@ -1555,6 +1757,8 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         rsvps,
         addRsvp,
         projects,
+        participantPrivateMap,
+        saveParticipantPrivate,
         galleryAlbums,
         transparencyDocs,
         facilityPolos,
@@ -1564,6 +1768,7 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addContactMessage,
         auditLogs,
         addAuditLog,
+        recordAuditEvent,
         clearAuditLogs,
         resetAllToDefaults,
         exportDatabaseJson,

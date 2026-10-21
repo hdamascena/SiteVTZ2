@@ -245,9 +245,9 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
         </div>
 
         <div className="flex items-center justify-between text-[11px] text-slate-300">
-          <span className="text-slate-400">Idade / Porte:</span>
+          <span className="text-slate-400">Categoria / Pé:</span>
           <span className="font-semibold text-white">
-            {participant.age} anos · {participant.height} · {participant.weight}
+            {participant.category} · {participant.preferredFoot}
           </span>
         </div>
 

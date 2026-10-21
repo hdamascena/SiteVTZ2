@@ -37,7 +37,7 @@ function VitalizarMainApp() {
 
   useEffect(() => {
     const checkHash = () => {
-      if (window.location.hash === '#admin') {
+      if (window.location.hash.startsWith('#admin')) {
         setAdminOpen(true);
       }
     };
@@ -293,9 +293,10 @@ function VitalizarMainApp() {
       {/* Admin Control Panel */}
       {adminOpen && (
         <AdminPanel
+          isOpen={adminOpen}
           onClose={() => {
             setAdminOpen(false);
-            if (window.location.hash === '#admin') {
+            if (window.location.hash.startsWith('#admin')) {
               window.history.pushState(null, '', window.location.pathname);
             }
           }}
