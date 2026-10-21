@@ -1,0 +1,13 @@
+{
+  "excludes": [
+    ".aistudio/",
+    ".agents/",
+    "agent/",
+    "skills/",
+    ".vscode/",
+    "public/",
+    "AGENTS.md",
+    "index.html",
+    "skills-lock.json"
+  ]
+}
