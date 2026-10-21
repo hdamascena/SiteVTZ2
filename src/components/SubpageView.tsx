@@ -51,6 +51,18 @@ import {
   Zap,
   ChevronRight,
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  PieChart as RechartsPieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from 'recharts';
 import { FACILITY_POLOS, DEFAULT_SITE_SETTINGS } from '../data/clubeData.ts';
 import { useClubData } from '../context/ClubDataContext.tsx';
 import {
@@ -1604,38 +1616,130 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
               </div>
 
               {dashboardBreakdownTab === 'allocation' && (
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <p className="text-xs text-slate-600 leading-relaxed">
-                    Demonstrativo da aplicação direta dos recursos financeiros por eixo de atuação estatutária em Cariacica/ES:
+                    Demonstrativo gráfico e analítico da aplicação direta dos recursos financeiros por eixo de atuação estatutária em Cariacica/ES:
                   </p>
 
-                  <div className="space-y-4">
-                    {dash.allocationBreakdown.map((item) => (
-                      <div
-                        key={item.label}
-                        className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2"
-                      >
-                        <div className="flex flex-wrap items-baseline justify-between gap-2">
-                          <span className="text-xs font-bold text-slate-900">{item.label}</span>
-                          <div className="flex items-center gap-2 font-mono tabular-nums text-xs">
-                            <span className="font-bold text-slate-900">
-                              R$ {item.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </span>
-                            <span className="text-slate-400">·</span>
-                            <span className="font-bold text-[#0284c7]">{item.percentage}%</span>
-                          </div>
-                        </div>
-
-                        <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-[#0284c7] rounded-full transition-all duration-300"
-                            style={{ width: `${item.percentage}%` }}
+                  {/* Recharts Financial Allocation Visualization */}
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center p-4 bg-slate-50 rounded-xl border border-slate-200/80">
+                    <div className="md:col-span-5 h-52 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <RechartsPieChart>
+                          <Pie
+                            data={dash.allocationBreakdown.map((item) => ({
+                              name: item.label.split('&')[0].trim(),
+                              fullLabel: item.label,
+                              value: item.amount,
+                              percentage: item.percentage,
+                            }))}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={48}
+                            outerRadius={76}
+                            paddingAngle={3}
+                          >
+                            {['#0284c7', '#0f766e', '#0369a1', '#334155'].map((color, idx) => (
+                              <Cell key={`cell-${idx}`} fill={color} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(value: any, _name: any, props: any) => [
+                              `R$ ${Number(value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${props?.payload?.percentage}%)`,
+                              props?.payload?.fullLabel || 'Alocação',
+                            ]}
+                            contentStyle={{
+                              fontSize: '12px',
+                              borderRadius: '8px',
+                              borderColor: '#e2e8f0',
+                            }}
                           />
-                        </div>
+                        </RechartsPieChart>
+                      </ResponsiveContainer>
+                    </div>
 
-                        <p className="text-[11px] text-slate-500">{item.description}</p>
-                      </div>
-                    ))}
+                    <div className="md:col-span-7 h-52 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={dash.allocationBreakdown.map((item) => ({
+                            shortName: item.label.split('&')[0].trim().slice(0, 18),
+                            fullLabel: item.label,
+                            amount: item.amount,
+                            percentage: item.percentage,
+                          }))}
+                          layout="vertical"
+                          margin={{ top: 4, right: 16, left: 4, bottom: 4 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                          <XAxis
+                            type="number"
+                            tickFormatter={(v) => `R$ ${(Number(v) / 1000).toFixed(0)}k`}
+                            tick={{ fontSize: 11, fill: '#64748b' }}
+                          />
+                          <YAxis
+                            type="category"
+                            dataKey="shortName"
+                            width={115}
+                            tick={{ fontSize: 11, fill: '#0f172a', fontWeight: 600 }}
+                          />
+                          <Tooltip
+                            formatter={(value: any, _name: any, props: any) => [
+                              `R$ ${Number(value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${props?.payload?.percentage}%)`,
+                              props?.payload?.fullLabel || 'Investimento',
+                            ]}
+                            contentStyle={{
+                              fontSize: '12px',
+                              borderRadius: '8px',
+                              borderColor: '#e2e8f0',
+                            }}
+                          />
+                          <Bar dataKey="amount" radius={[0, 6, 6, 0]}>
+                            {['#0284c7', '#0f766e', '#0369a1', '#334155'].map((color, idx) => (
+                              <Cell key={`bar-${idx}`} fill={color} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {dash.allocationBreakdown.map((item, idx) => {
+                      const dotColors = ['bg-[#0284c7]', 'bg-teal-700', 'bg-[#0369a1]', 'bg-slate-700'];
+                      return (
+                        <div
+                          key={item.label}
+                          className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2"
+                        >
+                          <div className="flex flex-wrap items-baseline justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`w-2.5 h-2.5 rounded-sm shrink-0 ${dotColors[idx % dotColors.length]}`}
+                              />
+                              <span className="text-xs font-bold text-slate-900">{item.label}</span>
+                            </div>
+                            <div className="flex items-center gap-2 font-mono tabular-nums text-xs">
+                              <span className="font-bold text-slate-900">
+                                R$ {item.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                              <span className="text-slate-400">·</span>
+                              <span className="font-bold text-[#0284c7]">{item.percentage}%</span>
+                            </div>
+                          </div>
+
+                          <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-[#0284c7] rounded-full transition-all duration-300"
+                              style={{ width: `${item.percentage}%` }}
+                            />
+                          </div>
+
+                          <p className="text-[11px] text-slate-500">{item.description}</p>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1643,8 +1747,45 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
               {dashboardBreakdownTab === 'sources' && (
                 <div className="space-y-4">
                   <p className="text-xs text-slate-600 leading-relaxed">
-                    Composição das fontes de custeio auditadas em contas bancárias específicas da Associação Esportiva Vitalizar:
+                    Composição gráfica das fontes de custeio auditadas em contas bancárias específicas da Associação Esportiva Vitalizar:
                   </p>
+
+                  {/* Recharts Revenue Sources BarChart */}
+                  <div className="h-52 w-full p-4 bg-slate-50 rounded-xl border border-slate-200/80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={dash.revenueSources.map((src) => ({
+                          shortName: src.label.split('&')[0].trim().slice(0, 22),
+                          fullLabel: src.label,
+                          amount: src.amount,
+                          percentage: src.percentage,
+                        }))}
+                        margin={{ top: 8, right: 16, left: 8, bottom: 4 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                        <XAxis
+                          dataKey="shortName"
+                          tick={{ fontSize: 11, fill: '#0f172a', fontWeight: 600 }}
+                        />
+                        <YAxis
+                          tickFormatter={(v) => `R$ ${(Number(v) / 1000).toFixed(0)}k`}
+                          tick={{ fontSize: 11, fill: '#64748b' }}
+                        />
+                        <Tooltip
+                          formatter={(value: any, _name: any, props: any) => [
+                            `R$ ${Number(value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${props?.payload?.percentage}%)`,
+                            props?.payload?.fullLabel || 'Fonte de Receita',
+                          ]}
+                          contentStyle={{
+                            fontSize: '12px',
+                            borderRadius: '8px',
+                            borderColor: '#e2e8f0',
+                          }}
+                        />
+                        <Bar dataKey="amount" fill="#0284c7" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
 
                   <div className="space-y-3.5">
                     {dash.revenueSources.map((src) => (
