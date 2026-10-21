@@ -48,7 +48,8 @@ export const ScoutContactModal: React.FC<ScoutContactModalProps> = ({
       organization: scoutOrg.trim() || 'Observador Independente',
       role: scoutRole,
       phone: scoutPhone.trim(),
-      email: scoutEmail.trim() || 'olheiro@contato.com',
+      // E-mail is optional: store it empty rather than an address that does not exist
+      email: scoutEmail.trim(),
       inquiryType: scoutInterest.toLowerCase().includes('relatório')
         ? 'relatorio_atleta'
         : scoutInterest.toLowerCase().includes('parceria')
@@ -64,7 +65,7 @@ export const ScoutContactModal: React.FC<ScoutContactModalProps> = ({
 
     addContactMessage({
       name: `${scoutName.trim()} (${scoutOrg.trim() || 'Scout Independente'})`,
-      email: scoutEmail.trim() || 'olheiro@contato.com',
+      email: scoutEmail.trim(),
       phone: scoutPhone.trim(),
       subject: `[SCOUT / OLHEIRO] Avaliação de Atleta: ${player.name} (${player.position})`,
       message: `Atleta: ${player.name} (Camisa #${player.jerseyNumber} · ${player.position} · ${player.category})\nProjeto: ${projectName}\nOrganização / Clube: ${scoutOrg}\nCargo: ${scoutRole}\nInteresse: ${scoutInterest}\n\nObservações do Olheiro:\n${scoutMessage}`,

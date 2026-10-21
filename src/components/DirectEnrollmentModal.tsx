@@ -44,21 +44,21 @@ export const DirectEnrollmentModal: React.FC<DirectEnrollmentModalProps> = ({
     e.preventDefault();
     if (!studentName.trim() || !phone.trim()) return;
 
-    const protocolNum = `VZT-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
-    setEnrollmentProtocol(protocolNum);
-
     const turnLabel = turn === 'matutino' ? 'Manhã' : 'Tarde';
     const detail = responsibleName.trim()
       ? `${studentName.trim()} (${studentAge} anos · Resp: ${responsibleName.trim()} · ${turnLabel})`
       : `${studentName.trim()} (${studentAge} anos · ${turnLabel})`;
 
-    addRsvp({
+    // The protocol shown to the family must be the code stored with the RSVP, so the admin can find it
+    const protocolNum = addRsvp({
       eventId: `inscricao-${project.id}`,
       eventTitle: `Inscrição Direta: ${project.name} (${poloPreference})`,
       name: detail,
       phone: phone.trim(),
+      email: email.trim() || undefined,
       spots: 1,
     });
+    setEnrollmentProtocol(protocolNum);
 
     setIsSuccess(true);
     showToast(`Inscrição realizada com sucesso no ${project.name}! Protocolo: ${protocolNum}`);

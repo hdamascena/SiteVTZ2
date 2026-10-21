@@ -6928,6 +6928,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                 'Código de Confirmação',
                 'Nome do Participante',
                 'Telefone/WhatsApp',
+                'E-mail',
+                'Observações',
                 'Evento / Modalidade',
                 'Vagas',
                 'Data Registro',
@@ -6936,6 +6938,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                 r.confirmationCode,
                 `"${(r.name || '').replace(/"/g, '""')}"`,
                 `"${r.phone || ''}"`,
+                `"${(r.email || '').replace(/"/g, '""')}"`,
+                `"${(r.notes || '').replace(/"/g, '""')}"`,
                 `"${(r.eventTitle || '').replace(/"/g, '""')}"`,
                 r.spots,
                 `"${r.date || ''}"`,
@@ -7213,8 +7217,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                         {filteredRsvps.map((r) => (
                           <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
                             <td className="p-3.5 font-mono font-bold text-[#0284c7]">{r.confirmationCode}</td>
-                            <td className="p-3.5 font-bold text-slate-800">{r.name}</td>
-                            <td className="p-3.5 text-slate-600 font-medium">{r.phone}</td>
+                            <td className="p-3.5 font-bold text-slate-800">
+                              {r.name}
+                              {r.notes && (
+                                <span className="block text-[11px] font-medium text-slate-500">{r.notes}</span>
+                              )}
+                            </td>
+                            <td className="p-3.5 text-slate-600 font-medium">
+                              {r.phone}
+                              {r.email && (
+                                <span className="block text-[11px] text-slate-500 break-all">{r.email}</span>
+                              )}
+                            </td>
                             <td className="p-3.5 text-slate-700">{r.eventTitle}</td>
                             <td className="p-3.5 text-center font-bold text-[#0a1e36]">
                               <span className="bg-sky-50 text-[#0284c7] border border-sky-200 px-2.5 py-0.5 rounded-full">
@@ -7415,7 +7429,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-100 text-[11px] text-slate-500">
                             <div>
                               <span>
-                                E-mail: <strong>{msg.email}</strong>
+                                E-mail: <strong>{msg.email || 'não informado'}</strong>
                               </span>{' '}
                               •{' '}
                               <span>
@@ -7433,14 +7447,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                                   Responder WhatsApp
                                 </a>
                               )}
-                              <a
-                                href={`mailto:${msg.email}?subject=${encodeURIComponent(
-                                  `Retorno Vitalizar: ${msg.subject}`
-                                )}`}
-                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-xs transition-colors"
-                              >
-                                Responder E-mail
-                              </a>
+                              {msg.email && (
+                                <a
+                                  href={`mailto:${msg.email}?subject=${encodeURIComponent(
+                                    `Retorno Vitalizar: ${msg.subject}`
+                                  )}`}
+                                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-xs transition-colors"
+                                >
+                                  Responder E-mail
+                                </a>
+                              )}
                               <button
                                 onClick={() => {
                                   setDraftMessages((prev) =>
@@ -8124,7 +8140,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                               <span className="font-semibold text-slate-800 block">
                                 Tel: {inq.phone}
                               </span>
-                              <span className="text-slate-600 block truncate">{inq.email}</span>
+                              <span className="text-slate-600 block truncate">{inq.email || 'E-mail não informado'}</span>
                             </div>
                           </div>
 

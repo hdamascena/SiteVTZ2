@@ -40,6 +40,7 @@ export const ReservationSimulatorModal: React.FC<ReservationSimulatorModalProps>
   const [responsibleName, setResponsibleName] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
   const [turn, setTurn] = useState<string>('matutino');
+  const [schoolStatus, setSchoolStatus] = useState<string>('Sim, Rede Pública de Cariacica');
   const [isConfirmed, setIsConfirmed] = useState<boolean>(false);
 
   const selectedPolo = polosList.find((p) => p.id === selectedPoloId) || polosList[0];
@@ -57,6 +58,7 @@ export const ReservationSimulatorModal: React.FC<ReservationSimulatorModalProps>
       eventTitle: `${MODALITY_NAMES[modalityKey] || modalityKey} — ${selectedPolo.name} (${turnLabel})`,
       name: fullNameInfo,
       phone: phone.trim(),
+      notes: `Matrícula escolar: ${schoolStatus}`,
       spots: 1,
     });
     setIsConfirmed(true);
@@ -106,7 +108,7 @@ export const ReservationSimulatorModal: React.FC<ReservationSimulatorModalProps>
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl max-w-md mx-auto text-left text-xs space-y-1">
               <p>• <strong>Polo:</strong> {selectedPolo.name}</p>
               <p>• <strong>Endereço:</strong> {selectedPolo.address}</p>
-              <p>• <strong>Turno:</strong> {turn === 'matutino' ? 'Manhã (08h às 10h)' : 'Tarde (14h às 16h)'}</p>
+              <p>• <strong>Turno:</strong> {turn === 'matutino' ? 'Manhã (08h às 10h)' : turn === 'vespertino' ? 'Tarde (14h às 16h)' : 'Noite (Condicionamento)'}</p>
               <p>• <strong>Contato:</strong> {phone}</p>
             </div>
 
@@ -278,7 +280,11 @@ export const ReservationSimulatorModal: React.FC<ReservationSimulatorModalProps>
                   <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
                     Matrícula Escolar Ativa?
                   </label>
-                  <select className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:outline-none">
+                  <select
+                    value={schoolStatus}
+                    onChange={(e) => setSchoolStatus(e.target.value)}
+                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  >
                     <option>Sim, Rede Pública de Cariacica</option>
                     <option>Sim, Rede Estadual / Particular</option>
                     <option>Não se aplica (Maior de idade)</option>

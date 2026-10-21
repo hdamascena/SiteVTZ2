@@ -130,6 +130,8 @@ export interface EventRsvpRecord {
   eventTitle: string;
   name: string;
   phone: string;
+  email?: string;
+  notes?: string;
   spots: number;
   date: string;
   confirmationCode: string;
