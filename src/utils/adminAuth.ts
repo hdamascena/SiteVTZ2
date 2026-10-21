@@ -1,18 +1,7 @@
 /**
- * Pure utility functions for Admin Authentication, Rate-limiting,
- * Session Management, and Data Integrity checks.
+ * Pure utility functions for Admin Session Management, audit logs
+ * and Data Integrity checks. Authentication itself is Firebase Auth.
  */
-
-export interface AdminCredentials {
-  email: string;
-  passwordHashOrPlain: string;
-  securityPin: string;
-}
-
-export interface RateLimitState {
-  failedAttempts: number;
-  lockedUntil: number | null; // epoch ms
-}
 
 export interface AdminSession {
   token: string;
@@ -29,76 +18,6 @@ export interface AuditLogEntry {
   details?: string;
 }
 
-const DEFAULT_LOCKOUT_MS = 3 * 60 * 1000; // 3 minutes lockout
-const MAX_ATTEMPTS = 5;
-const DEFAULT_SESSION_DURATION_MS = 2 * 60 * 60 * 1000; // 2 hours
-
-/**
- * Validates admin credentials against stored credentials considering rate-limiting.
- */
-export function validateAdminCredentials(
-  inputEmail: string,
-  inputPass: string,
-  storedCreds: AdminCredentials,
-  rateLimit: RateLimitState,
-  currentTime: number = Date.now()
-): {
-  success: boolean;
-  reason?: string;
-  updatedRateLimit: RateLimitState;
-  session?: AdminSession;
-} {
-  // Check if currently locked out
-  if (rateLimit.lockedUntil && currentTime < rateLimit.lockedUntil) {
-    const remainingSec = Math.ceil((rateLimit.lockedUntil - currentTime) / 1000);
-    return {
-      success: false,
-      reason: `Acesso temporariamente bloqueado por excesso de tentativas incorretas. Aguarde ${remainingSec}s.`,
-      updatedRateLimit: rateLimit,
-    };
-  }
-
-  const cleanEmail = inputEmail.trim().toLowerCase();
-  const targetEmail = storedCreds.email.trim().toLowerCase();
-
-  const isMatch = cleanEmail === targetEmail && inputPass === storedCreds.passwordHashOrPlain;
-
-  if (isMatch) {
-    // Generate session
-    const session: AdminSession = {
-      token: `vtl-adm-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-      adminEmail: cleanEmail,
-      loginTime: currentTime,
-      expiresAt: currentTime + DEFAULT_SESSION_DURATION_MS,
-    };
-
-    return {
-      success: true,
-      updatedRateLimit: {
-        failedAttempts: 0,
-        lockedUntil: null,
-      },
-      session,
-    };
-  }
-
-  // Failed attempt
-  const newAttempts = rateLimit.failedAttempts + 1;
-  const isNowLocked = newAttempts >= MAX_ATTEMPTS;
-  const lockedUntil = isNowLocked ? currentTime + DEFAULT_LOCKOUT_MS : null;
-
-  return {
-    success: false,
-    reason: isNowLocked
-      ? `Credenciais incorretas. Limite de ${MAX_ATTEMPTS} tentativas atingido! Acesso bloqueado por 3 minutos.`
-      : `E-mail ou senha de administrador inválidos. Restam ${MAX_ATTEMPTS - newAttempts} tentativa(s).`,
-    updatedRateLimit: {
-      failedAttempts: newAttempts,
-      lockedUntil,
-    },
-  };
-}
-
 /**
  * Checks if an administrative session is active and not expired.
  */
@@ -110,49 +29,6 @@ export function isSessionValid(
     return false;
   }
   return currentTime < session.expiresAt;
-}
-
-/**
- * Validates the 6-digit administrative PIN for critical/destructive actions.
- */
-export function validateSecurityPin(inputPin: string, storedPin: string): boolean {
-  if (!inputPin || !storedPin) return false;
-  return inputPin.trim() === storedPin.trim();
-}
-
-/**
- * Validates password strength for admin password changes.
- */
-export function validatePasswordStrength(password: string): {
-  valid: boolean;
-  score: 'fraca' | 'media' | 'forte';
-  reason?: string;
-} {
-  if (!password || password.length < 8) {
-    return {
-      valid: false,
-      score: 'fraca',
-      reason: 'A senha deve ter no mínimo 8 caracteres.',
-    };
-  }
-
-  const hasLetter = /[a-zA-Z]/.test(password);
-  const hasNumber = /[0-9]/.test(password);
-  const hasSpecial = /[^a-zA-Z0-9]/.test(password);
-
-  if (!hasLetter || !hasNumber) {
-    return {
-      valid: false,
-      score: 'fraca',
-      reason: 'A senha deve conter pelo menos uma letra e um número.',
-    };
-  }
-
-  if (password.length >= 10 && hasSpecial) {
-    return { valid: true, score: 'forte' };
-  }
-
-  return { valid: true, score: 'media' };
 }
 
 /**

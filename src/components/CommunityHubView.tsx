@@ -19,7 +19,7 @@ import { useClubData } from '../context/ClubDataContext.tsx';
 import { DEFAULT_SITE_SETTINGS } from '../data/clubeData.ts';
 import {
   generatePixBrCode,
-  generateDeterministicQrMatrix,
+  generatePixQrMatrix,
 } from '../utils/pixPayload.ts';
 import type {
   VolunteerApplicationRecord,
@@ -45,7 +45,8 @@ export const CommunityHubView: React.FC<CommunityHubViewProps> = ({
   const {
     clubInfo,
     siteSettings,
-    setSiteSettings,
+    addDonationPledge,
+    addVolunteerApplication,
     showToast,
     addAuditLog,
   } = useClubData();
@@ -121,7 +122,7 @@ export const CommunityHubView: React.FC<CommunityHubViewProps> = ({
   );
 
   const qrMatrix = useMemo(
-    () => generateDeterministicQrMatrix(pixBrCode),
+    () => generatePixQrMatrix(pixBrCode),
     [pixBrCode]
   );
 
@@ -161,11 +162,7 @@ export const CommunityHubView: React.FC<CommunityHubViewProps> = ({
       status: 'registrado',
     };
 
-    const nextPledges = [newPledge, ...(siteSettings.donationPledges || [])];
-    setSiteSettings({
-      ...siteSettings,
-      donationPledges: nextPledges,
-    });
+    addDonationPledge(newPledge);
     addAuditLog(
       'DOACAO_PIX_REGISTRADA',
       `Registro de apoio PIX (${protocol}) de ${newPledge.donorName} no valor de R$ ${effectivePixAmount.toFixed(2)}.`
@@ -208,11 +205,7 @@ export const CommunityHubView: React.FC<CommunityHubViewProps> = ({
       status: 'novo',
     };
 
-    const nextVolunteers = [newVol, ...(siteSettings.volunteers || [])];
-    setSiteSettings({
-      ...siteSettings,
-      volunteers: nextVolunteers,
-    });
+    addVolunteerApplication(newVol);
     addAuditLog(
       'VOLUNTARIO_CADASTRADO',
       `Nova inscrição de voluntário (${protocol}): ${newVol.name} - Área: ${newVol.area}.`
@@ -706,10 +699,10 @@ export const CommunityHubView: React.FC<CommunityHubViewProps> = ({
               <ShieldCheck className="w-7 h-7 text-emerald-400 shrink-0" />
             </div>
 
-            {/* Deterministic Crisp SVG QR Code */}
+            {/* Real BR Code QR (white p-4 padding acts as the quiet zone) */}
             <div className="bg-white p-4 rounded-2xl max-w-[220px] mx-auto shadow-lg">
               <svg
-                viewBox="0 0 25 25"
+                viewBox={`0 0 ${qrMatrix.length} ${qrMatrix.length}`}
                 className="w-full h-auto aspect-square"
                 shapeRendering="crispEdges"
                 aria-label="QR Code PIX Associação Esportiva Vitalizar"

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import {
   CLUB_INFO,
   NEWS_ARTICLES,
@@ -19,14 +19,18 @@ import type {
   SiteSettings,
   FacilityPolo,
   ScoutInquiryRecord,
+  DonationPledgeRecord,
+  VolunteerApplicationRecord,
+  AttendanceSessionRecord,
 } from '../types/index.ts';
 import {
   createAuditLogEntry,
   validateBackupSchema,
 } from '../utils/adminAuth.ts';
 import type { AuditLogEntry } from '../utils/adminAuth.ts';
-import { db } from '../firebase.ts';
+import { db, auth } from '../firebase.ts';
 import { doc, getDoc, getDocs, collection, setDoc, deleteDoc } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 
 export const INITIAL_GALLERY_ALBUMS: PastEventPhoto[] = [
   {
@@ -150,44 +154,22 @@ export interface ToastNotification {
 
 interface ClubDataContextType {
   clubInfo: typeof CLUB_INFO;
-  setClubInfo: (info: typeof CLUB_INFO) => void;
   siteSettings: SiteSettings;
-  setSiteSettings: (settings: SiteSettings) => void;
+  addDonationPledge: (pledge: DonationPledgeRecord) => void;
+  addVolunteerApplication: (application: VolunteerApplicationRecord) => void;
   newsArticles: NewsArticle[];
-  addNewsArticle: (article: Omit<NewsArticle, 'id'>) => void;
-  updateNewsArticle: (article: NewsArticle) => void;
-  deleteNewsArticle: (id: string) => void;
   events: VitalizarEvent[];
-  addEvent: (event: Omit<VitalizarEvent, 'id'>) => void;
-  updateEvent: (event: VitalizarEvent) => void;
-  deleteEvent: (id: string) => void;
   rsvps: EventRsvpRecord[];
   addRsvp: (rsvp: Omit<EventRsvpRecord, 'id' | 'confirmationCode' | 'date'>) => string;
-  deleteRsvp: (id: string) => void;
   projects: VitalizarProject[];
-  addProject: (project: Omit<VitalizarProject, 'id'>) => void;
-  updateProject: (project: VitalizarProject) => void;
-  deleteProject: (id: string) => void;
   galleryAlbums: PastEventPhoto[];
-  addGalleryAlbum: (album: Omit<PastEventPhoto, 'id'>) => void;
-  updateGalleryAlbum: (album: PastEventPhoto) => void;
-  deleteGalleryAlbum: (id: string) => void;
   transparencyDocs: TransparencyDocument[];
-  addTransparencyDoc: (doc: Omit<TransparencyDocument, 'id'>) => void;
-  updateTransparencyDoc: (doc: TransparencyDocument) => void;
-  deleteTransparencyDoc: (id: string) => void;
   sponsors: Sponsor[];
-  addSponsor: (sponsor: Omit<Sponsor, 'id'>) => void;
-  updateSponsor: (sponsor: Sponsor) => void;
-  deleteSponsor: (id: string) => void;
   facilityPolos: FacilityPolo[];
   scoutInquiries: ScoutInquiryRecord[];
   addScoutInquiry: (inquiry: Omit<ScoutInquiryRecord, 'id' | 'protocol' | 'createdAt' | 'status'>) => string;
-  deleteScoutInquiry: (id: string) => void;
   contactMessages: ContactMessageRecord[];
   addContactMessage: (msg: Omit<ContactMessageRecord, 'id' | 'date' | 'read'>) => void;
-  markContactMessageRead: (id: string) => void;
-  deleteContactMessage: (id: string) => void;
   auditLogs: AuditLogEntry[];
   addAuditLog: (action: string, details?: string, adminEmail?: string) => void;
   clearAuditLogs: () => void;
@@ -682,6 +664,30 @@ function sanitizeForFirestore<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
 }
 
+// Site settings lists with personal data: stored in admin-only collections, never in the public site_settings doc
+const PRIVATE_SETTINGS_COLLECTIONS = {
+  donationPledges: 'donation_pledges',
+  volunteers: 'volunteer_applications',
+  attendanceSessions: 'attendance_sessions',
+} as const;
+
+function toPublicSiteSettings(settings: SiteSettings): SiteSettings {
+  const { donationPledges, attendanceSessions, volunteers, ...publicSettings } = settings;
+  return {
+    ...publicSettings,
+    // The site only lists active volunteers, without their contact or motivation
+    volunteers: (volunteers || [])
+      .filter((v) => v.status === 'ativo')
+      .map((v) => ({ ...v, contactInfo: '', motivation: '' })),
+  };
+}
+
+// Remote records win; records that only exist in this browser are kept after them
+function mergeRemoteFirst<T extends { id: string }>(remote: T[], local: T[]): T[] {
+  const remoteIds = new Set(remote.map((item) => item.id));
+  return [...remote.reverse(), ...local.filter((item) => !remoteIds.has(item.id))];
+}
+
 const ClubDataContext = createContext<ClubDataContextType | null>(null);
 
 export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -884,6 +890,8 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   const [isFirebaseActive, setIsFirebaseActive] = useState<boolean>(true);
+  // Set once an admin has loaded the private settings lists, so the public doc never overwrites them
+  const privateSettingsLoaded = useRef(false);
 
   // Sync initial data from Firestore if available (Batched in a single render pass)
   useEffect(() => {
@@ -899,6 +907,7 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           projectsRes,
           galleryRes,
           docsRes,
+          polosRes,
         ] = await Promise.allSettled([
           getDoc(doc(db, 'club_info', 'main')),
           getDoc(doc(db, 'site_settings', 'main')),
@@ -908,6 +917,7 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           getDocs(collection(db, 'projects')),
           getDocs(collection(db, 'gallery_albums')),
           getDocs(collection(db, 'transparency_docs')),
+          getDocs(collection(db, 'facility_polos')),
         ]);
 
         if (!isMounted) return;
@@ -924,8 +934,18 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const remoteSettings = normalizeSiteSettings(
             settingsRes.value.data() as Partial<SiteSettings>
           );
-          setSiteSettingsState(remoteSettings);
-          localStorage.setItem(STORAGE_KEYS.SITE_SETTINGS, JSON.stringify(remoteSettings));
+          setSiteSettingsState((prev) => {
+            const merged = privateSettingsLoaded.current
+              ? {
+                  ...remoteSettings,
+                  donationPledges: prev.donationPledges,
+                  volunteers: prev.volunteers,
+                  attendanceSessions: prev.attendanceSessions,
+                }
+              : remoteSettings;
+            localStorage.setItem(STORAGE_KEYS.SITE_SETTINGS, JSON.stringify(merged));
+            return merged;
+          });
         }
 
         if (newsRes.status === 'fulfilled' && !newsRes.value.empty) {
@@ -977,6 +997,14 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           localStorage.setItem(STORAGE_KEYS.TRANSPARENCY, JSON.stringify(remoteDocs));
         }
 
+        if (polosRes.status === 'fulfilled' && !polosRes.value.empty) {
+          const remotePolos = normalizeFacilityPolos(
+            polosRes.value.docs.map((d) => d.data() as FacilityPolo)
+          );
+          setFacilityPolos(remotePolos);
+          localStorage.setItem(STORAGE_KEYS.POLOS, JSON.stringify(remotePolos));
+        }
+
         setIsFirebaseActive(true);
       } catch (err) {
         console.info('Firestore offline ou em fallback local:', err);
@@ -986,6 +1014,72 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => {
       isMounted = false;
     };
+  }, []);
+
+  // Admin-only records (visitor submissions and private lists): the rules deny these reads to anyone else
+  useEffect(() => {
+    return onAuthStateChanged(auth, async (user) => {
+      if (!user) return;
+      const [rsvpRes, msgRes, scoutRes, pledgeRes, volRes, attendanceRes] = await Promise.allSettled([
+        getDocs(collection(db, 'rsvps')),
+        getDocs(collection(db, 'contact_messages')),
+        getDocs(collection(db, 'scout_inquiries')),
+        getDocs(collection(db, PRIVATE_SETTINGS_COLLECTIONS.donationPledges)),
+        getDocs(collection(db, PRIVATE_SETTINGS_COLLECTIONS.volunteers)),
+        getDocs(collection(db, PRIVATE_SETTINGS_COLLECTIONS.attendanceSessions)),
+      ]);
+
+      if (rsvpRes.status === 'fulfilled') {
+        const remote = rsvpRes.value.docs.map((d) => d.data() as EventRsvpRecord);
+        setRsvps((prev) => {
+          const updated = mergeRemoteFirst(remote, prev);
+          localStorage.setItem(STORAGE_KEYS.RSVPS, JSON.stringify(updated));
+          return updated;
+        });
+      }
+      if (msgRes.status === 'fulfilled') {
+        const remote = msgRes.value.docs.map((d) => d.data() as ContactMessageRecord);
+        setContactMessages((prev) => {
+          const updated = mergeRemoteFirst(remote, prev);
+          localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(updated));
+          return updated;
+        });
+      }
+      if (scoutRes.status === 'fulfilled') {
+        const remote = scoutRes.value.docs.map((d) => d.data() as ScoutInquiryRecord);
+        setScoutInquiries((prev) => {
+          const updated = mergeRemoteFirst(remote, prev);
+          localStorage.setItem(STORAGE_KEYS.SCOUT_INQUIRIES, JSON.stringify(updated));
+          return updated;
+        });
+      }
+      if (
+        pledgeRes.status === 'fulfilled' &&
+        volRes.status === 'fulfilled' &&
+        attendanceRes.status === 'fulfilled'
+      ) {
+        privateSettingsLoaded.current = true;
+        setSiteSettingsState((prev) => {
+          const updated: SiteSettings = {
+            ...prev,
+            donationPledges: mergeRemoteFirst(
+              pledgeRes.value.docs.map((d) => d.data() as DonationPledgeRecord),
+              prev.donationPledges || []
+            ),
+            volunteers: mergeRemoteFirst(
+              volRes.value.docs.map((d) => d.data() as VolunteerApplicationRecord),
+              prev.volunteers || []
+            ),
+            attendanceSessions: mergeRemoteFirst(
+              attendanceRes.value.docs.map((d) => d.data() as AttendanceSessionRecord),
+              prev.attendanceSessions || []
+            ),
+          };
+          localStorage.setItem(STORAGE_KEYS.SITE_SETTINGS, JSON.stringify(updated));
+          return updated;
+        });
+      }
+    });
   }, []);
 
   // 9. Toasts
@@ -1003,26 +1097,6 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Sync helpers to localStorage
-  const setClubInfo = (info: typeof CLUB_INFO) => {
-    setClubInfoState(info);
-    localStorage.setItem(STORAGE_KEYS.CLUB_INFO, JSON.stringify(info));
-    addAuditLog('DADOS_ENTIDADE_ALTERADOS', 'Informações institucionais da Vitalizar atualizadas.');
-    showToast('Dados da entidade atualizados com sucesso!');
-  };
-
-  const setSiteSettings = (settings: SiteSettings) => {
-    setSiteSettingsState(settings);
-    localStorage.setItem(STORAGE_KEYS.SITE_SETTINGS, JSON.stringify(settings));
-    try {
-      setDoc(doc(db, 'site_settings', 'main'), settings).catch(console.warn);
-    } catch (err) {
-      console.warn('Erro ao salvar site_settings no Firestore:', err);
-    }
-    addAuditLog('CONFIGURACOES_ALTERADAS', 'Configurações de categorias, tags e parâmetros do portal atualizadas.');
-    showToast('Configurações do site atualizadas com sucesso!');
-  };
-
   const addAuditLog = (action: string, details?: string, adminEmail: string = 'admin@vitalizar.org.br') => {
     const entry = createAuditLogEntry(action, adminEmail, details);
     setAuditLogs((prev) => {
@@ -1032,81 +1106,35 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   };
 
-  // News CRUD
-  const addNewsArticle = (articleData: Omit<NewsArticle, 'id'>) => {
-    const newArticle: NewsArticle = {
-      ...articleData,
-      id: `noticia-${Date.now()}`,
-      views: 1,
-    };
-    setNewsArticles((prev) => {
-      const updated = [newArticle, ...prev];
-      localStorage.setItem(STORAGE_KEYS.NEWS, JSON.stringify(updated));
-      return updated;
-    });
-    addAuditLog('NOTICIA_CRIADA', `Notícia "${newArticle.title}" publicada.`);
-    showToast('Nova notícia publicada com sucesso!');
+  // Visitor submissions: the admin only sees them if this write reaches Firestore, so tell the visitor when it fails
+  const submitRecord = (collectionName: string, record: { id: string }) => {
+    Promise.resolve()
+      .then(() => setDoc(doc(db, collectionName, record.id), sanitizeForFirestore(record)))
+      .catch((err) => {
+        console.warn(`Firestore: envio para ${collectionName} falhou:`, err);
+        showToast(
+          'Não foi possível enviar seus dados à Associação agora. Tente novamente ou fale conosco pelo WhatsApp.',
+          'error'
+        );
+      });
   };
 
-  const updateNewsArticle = (article: NewsArticle) => {
-    setNewsArticles((prev) => {
-      const updated = prev.map((item) => (item.id === article.id ? article : item));
-      localStorage.setItem(STORAGE_KEYS.NEWS, JSON.stringify(updated));
+  const addDonationPledge = (pledge: DonationPledgeRecord) => {
+    setSiteSettingsState((prev) => {
+      const updated = { ...prev, donationPledges: [pledge, ...(prev.donationPledges || [])] };
+      localStorage.setItem(STORAGE_KEYS.SITE_SETTINGS, JSON.stringify(updated));
       return updated;
     });
-    addAuditLog('NOTICIA_EDITADA', `Notícia "${article.title}" atualizada.`);
-    showToast('Notícia atualizada com sucesso!');
+    submitRecord(PRIVATE_SETTINGS_COLLECTIONS.donationPledges, pledge);
   };
 
-  const deleteNewsArticle = (id: string) => {
-    setNewsArticles((prev) => {
-      const article = prev.find((a) => a.id === id);
-      const updated = prev.filter((item) => item.id !== id);
-      localStorage.setItem(STORAGE_KEYS.NEWS, JSON.stringify(updated));
-      if (article) {
-        addAuditLog('NOTICIA_EXCLUIDA', `Notícia "${article.title}" removida.`);
-      }
+  const addVolunteerApplication = (application: VolunteerApplicationRecord) => {
+    setSiteSettingsState((prev) => {
+      const updated = { ...prev, volunteers: [application, ...(prev.volunteers || [])] };
+      localStorage.setItem(STORAGE_KEYS.SITE_SETTINGS, JSON.stringify(updated));
       return updated;
     });
-    showToast('Notícia removida.');
-  };
-
-  // Events CRUD
-  const addEvent = (eventData: Omit<VitalizarEvent, 'id'>) => {
-    const newEvent: VitalizarEvent = {
-      ...eventData,
-      id: `evento-${Date.now()}`,
-    };
-    setEvents((prev) => {
-      const updated = [newEvent, ...prev];
-      localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(updated));
-      return updated;
-    });
-    addAuditLog('EVENTO_CRIADO', `Atividade "${newEvent.title}" adicionada ao calendário.`);
-    showToast('Evento adicionado ao calendário!');
-  };
-
-  const updateEvent = (event: VitalizarEvent) => {
-    setEvents((prev) => {
-      const updated = prev.map((e) => (e.id === event.id ? event : e));
-      localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(updated));
-      return updated;
-    });
-    addAuditLog('EVENTO_EDITADO', `Atividade "${event.title}" atualizada.`);
-    showToast('Evento atualizado com sucesso!');
-  };
-
-  const deleteEvent = (id: string) => {
-    setEvents((prev) => {
-      const ev = prev.find((e) => e.id === id);
-      const updated = prev.filter((e) => e.id !== id);
-      localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(updated));
-      if (ev) {
-        addAuditLog('EVENTO_EXCLUIDO', `Atividade "${ev.title}" removida do calendário.`);
-      }
-      return updated;
-    });
-    showToast('Evento excluído.');
+    submitRecord(PRIVATE_SETTINGS_COLLECTIONS.volunteers, application);
   };
 
   // RSVPs
@@ -1142,186 +1170,9 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
 
     addAuditLog('RSVP_REGISTRADO', `Inscrição de ${rsvpData.name} no evento "${rsvpData.eventTitle}" (${rsvpData.spots} vaga(s)).`);
-    
-    // Asynchronous Firestore sync
-    try {
-      setDoc(doc(db, 'rsvps', newRsvp.id), newRsvp).catch((err) => {
-        console.warn('Aviso: sync Firestore para RSVP falhou:', err);
-      });
-    } catch (err) {
-      console.warn('Erro ao disparar setDoc para RSVP:', err);
-    }
+    submitRecord('rsvps', newRsvp);
 
     return confirmationCode;
-  };
-
-  const deleteRsvp = (id: string) => {
-    setRsvps((prev) => {
-      const rsvp = prev.find((r) => r.id === id);
-      const updated = prev.filter((r) => r.id !== id);
-      localStorage.setItem(STORAGE_KEYS.RSVPS, JSON.stringify(updated));
-      if (rsvp) {
-        addAuditLog('RSVP_CANCELADO', `Inscrição de ${rsvp.name} para "${rsvp.eventTitle}" cancelada.`);
-      }
-      return updated;
-    });
-    showToast('Inscrição cancelada.');
-  };
-
-  // Projects CRUD
-  const addProject = (projectData: Omit<VitalizarProject, 'id'>) => {
-    const newProj: VitalizarProject = {
-      ...projectData,
-      id: `projeto-${Date.now()}`,
-    };
-    setProjects((prev) => {
-      const updated = [newProj, ...prev];
-      localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(updated));
-      return updated;
-    });
-    addAuditLog('PROJETO_CRIADO', `Novo projeto esportivo "${newProj.name}" cadastrado.`);
-    showToast('Novo projeto esportivo cadastrado!');
-  };
-
-  const updateProject = (project: VitalizarProject) => {
-    setProjects((prev) => {
-      const updated = prev.map((p) => (p.id === project.id ? project : p));
-      localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(updated));
-      return updated;
-    });
-    addAuditLog('PROJETO_ATUALIZADO', `Projeto esportivo "${project.name}" atualizado.`);
-    showToast('Projeto esportivo atualizado!');
-  };
-
-  const deleteProject = (id: string) => {
-    setProjects((prev) => {
-      const proj = prev.find((p) => p.id === id);
-      const updated = prev.filter((p) => p.id !== id);
-      localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(updated));
-      if (proj) {
-        addAuditLog('PROJETO_EXCLUIDO', `Projeto esportivo "${proj.name}" removido.`);
-      }
-      return updated;
-    });
-    showToast('Projeto removido.');
-  };
-
-  // Gallery Albums CRUD
-  const addGalleryAlbum = (albumData: Omit<PastEventPhoto, 'id'>) => {
-    const newAlbum: PastEventPhoto = {
-      ...albumData,
-      id: `album-${Date.now()}`,
-    };
-    setGalleryAlbums((prev) => {
-      const updated = [newAlbum, ...prev];
-      localStorage.setItem(STORAGE_KEYS.GALLERY, JSON.stringify(updated));
-      return updated;
-    });
-    addAuditLog('ALBUM_CRIADO', `Álbum de fotos "${newAlbum.title}" adicionado à galeria.`);
-    showToast('Álbum de fotos publicado na galeria!');
-  };
-
-  const updateGalleryAlbum = (album: PastEventPhoto) => {
-    setGalleryAlbums((prev) => {
-      const updated = prev.map((a) => (a.id === album.id ? album : a));
-      localStorage.setItem(STORAGE_KEYS.GALLERY, JSON.stringify(updated));
-      return updated;
-    });
-    addAuditLog('ALBUM_EDITADO', `Álbum de fotos "${album.title}" atualizado.`);
-    showToast('Álbum de fotos atualizado!');
-  };
-
-  const deleteGalleryAlbum = (id: string) => {
-    setGalleryAlbums((prev) => {
-      const alb = prev.find((a) => a.id === id);
-      const updated = prev.filter((a) => a.id !== id);
-      localStorage.setItem(STORAGE_KEYS.GALLERY, JSON.stringify(updated));
-      if (alb) {
-        addAuditLog('ALBUM_EXCLUIDO', `Álbum de fotos "${alb.title}" removido.`);
-      }
-      return updated;
-    });
-    showToast('Álbum removido da galeria.');
-  };
-
-  // Transparency Docs CRUD
-  const addTransparencyDoc = (docData: Omit<TransparencyDocument, 'id'>) => {
-    const newDoc: TransparencyDocument = {
-      ...docData,
-      id: `doc-${Date.now()}`,
-    };
-    setTransparencyDocs((prev) => {
-      const updated = [newDoc, ...prev];
-      localStorage.setItem(STORAGE_KEYS.TRANSPARENCY, JSON.stringify(updated));
-      return updated;
-    });
-    addAuditLog('DOCUMENTO_TRANSPARENCIA_CRIADO', `Documento MROSC "${newDoc.title}" publicado.`);
-    showToast('Documento publicado no Portal da Transparência!');
-  };
-
-  const updateTransparencyDoc = (doc: TransparencyDocument) => {
-    setTransparencyDocs((prev) => {
-      const updated = prev.map((d) => (d.id === doc.id ? doc : d));
-      localStorage.setItem(STORAGE_KEYS.TRANSPARENCY, JSON.stringify(updated));
-      return updated;
-    });
-    addAuditLog('DOCUMENTO_TRANSPARENCIA_EDITADO', `Documento "${doc.title}" atualizado.`);
-    showToast('Documento atualizado com sucesso!');
-  };
-
-  const deleteTransparencyDoc = (id: string) => {
-    setTransparencyDocs((prev) => {
-      const doc = prev.find((d) => d.id === id);
-      const updated = prev.filter((d) => d.id !== id);
-      localStorage.setItem(STORAGE_KEYS.TRANSPARENCY, JSON.stringify(updated));
-      if (doc) {
-        addAuditLog('DOCUMENTO_TRANSPARENCIA_REMOVIDO', `Documento "${doc.title}" removido.`);
-      }
-      return updated;
-    });
-    showToast('Documento removido da transparência.');
-  };
-
-  // Sponsors CRUD
-  const addSponsor = (sponData: Omit<Sponsor, 'id'>) => {
-    const newSponsor: Sponsor = {
-      ...sponData,
-      id: `patrocinador-${Date.now()}`,
-    };
-    setSponsors((prev) => {
-      const updated = [...prev, newSponsor];
-      updated.sort((a, b) => (a.order || 0) - (b.order || 0));
-      localStorage.setItem(STORAGE_KEYS.SPONSORS, JSON.stringify(updated));
-      return updated;
-    });
-    addAuditLog('PATROCINADOR_CRIADO', `Patrocinador "${newSponsor.name}" (${newSponsor.tierLabel}) adicionado.`);
-    showToast('Patrocinador adicionado com sucesso!');
-  };
-
-  const updateSponsor = (sponsor: Sponsor) => {
-    setSponsors((prev) => {
-      const updated = prev.map((s) => (s.id === sponsor.id ? sponsor : s));
-      updated.sort((a, b) => (a.order || 0) - (b.order || 0));
-      localStorage.setItem(STORAGE_KEYS.SPONSORS, JSON.stringify(updated));
-      return updated;
-    });
-    addAuditLog('PATROCINADOR_EDITADO', `Patrocinador "${sponsor.name}" atualizado.`);
-    showToast('Patrocinador atualizado com sucesso!');
-  };
-
-  const deleteSponsor = (id: string) => {
-    setSponsors((prev) => {
-      const spon = prev.find((s) => s.id === id);
-      const updated = prev.filter((s) => s.id !== id);
-      localStorage.setItem(STORAGE_KEYS.SPONSORS, JSON.stringify(updated));
-      if (spon) {
-        addAuditLog('PATROCINADOR_REMOVIDO', `Patrocinador "${spon.name}" removido.`);
-      }
-      return updated;
-    });
-    // Remove from Firestore if online
-    deleteDoc(doc(db, 'sponsors', id)).catch(console.warn);
-    showToast('Patrocinador removido.');
   };
 
   // Contact Messages
@@ -1338,32 +1189,7 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return updated;
     });
     addAuditLog('MENSAGEM_RECEBIDA', `Contato recebido de ${msgData.name} - Assunto: ${msgData.subject}`);
-
-    // Asynchronous Firestore sync
-    try {
-      setDoc(doc(db, 'contact_messages', newMsg.id), newMsg).catch((err) => {
-        console.warn('Aviso: sync Firestore para mensagem falhou:', err);
-      });
-    } catch (err) {
-      console.warn('Erro ao disparar setDoc para mensagem:', err);
-    }
-  };
-
-  const markContactMessageRead = (id: string) => {
-    setContactMessages((prev) => {
-      const updated = prev.map((m) => (m.id === id ? { ...m, read: true } : m));
-      localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(updated));
-      return updated;
-    });
-  };
-
-  const deleteContactMessage = (id: string) => {
-    setContactMessages((prev) => {
-      const updated = prev.filter((m) => m.id !== id);
-      localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(updated));
-      return updated;
-    });
-    showToast('Mensagem excluída.');
+    submitRecord('contact_messages', newMsg);
   };
 
   // Scout Inquiries & Space Reservations helpers
@@ -1387,23 +1213,8 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       'SONDAGem_OLHEIRO_RECEBIDA',
       `Proposta de captação (${protocol}) de ${inquiryData.scoutName} (${inquiryData.organization}) para ${inquiryData.targetPlayerName || inquiryData.targetCategory}.`
     );
-    try {
-      setDoc(doc(db, 'scout_inquiries', newInquiry.id), sanitizeForFirestore(newInquiry)).catch(
-        console.warn
-      );
-    } catch {
-      // ignore
-    }
+    submitRecord('scout_inquiries', newInquiry);
     return protocol;
-  };
-
-  const deleteScoutInquiry = (id: string) => {
-    setScoutInquiries((prev) => {
-      const updated = prev.filter((item) => item.id !== id);
-      localStorage.setItem(STORAGE_KEYS.SCOUT_INQUIRIES, JSON.stringify(updated));
-      return updated;
-    });
-    showToast('Registro de captação removido.');
   };
 
   // Reset to Defaults
@@ -1625,58 +1436,100 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setContactMessages(payload.contactMessages);
       }
 
-      // Asynchronous batch-like sync to Firestore (sanitized to strip undefined properties)
-      try {
-        if (payload.clubInfo) {
-          setDoc(doc(db, 'club_info', 'main'), sanitizeForFirestore(normalizeClubInfo(payload.clubInfo))).catch(console.warn);
-        }
-        if (payload.siteSettings) {
-          setDoc(doc(db, 'site_settings', 'main'), sanitizeForFirestore(normalizeSiteSettings(payload.siteSettings))).catch(console.warn);
-        }
-        if (payload.newsArticles) {
-          payload.newsArticles.forEach((art) => {
-            setDoc(doc(db, 'news_articles', art.id), sanitizeForFirestore(art)).catch(console.warn);
-          });
-        }
-        if (payload.sponsors) {
-          payload.sponsors.forEach((spon) => {
-            setDoc(doc(db, 'sponsors', spon.id), sanitizeForFirestore(spon)).catch(console.warn);
-          });
-        }
-        if (payload.events) {
-          payload.events.forEach((ev) => {
-            setDoc(doc(db, 'events', ev.id), sanitizeForFirestore(ev)).catch(console.warn);
-          });
-        }
-        if (payload.projects) {
-          payload.projects.forEach((proj) => {
-            setDoc(doc(db, 'projects', proj.id), sanitizeForFirestore(proj)).catch(console.warn);
-          });
-        }
-        if (payload.galleryAlbums) {
-          payload.galleryAlbums.forEach((alb) => {
-            setDoc(doc(db, 'gallery_albums', alb.id), sanitizeForFirestore(alb)).catch(console.warn);
-          });
-        }
-        if (payload.transparencyDocs) {
-          payload.transparencyDocs.forEach((d) => {
-            setDoc(doc(db, 'transparency_docs', d.id), sanitizeForFirestore(d)).catch(console.warn);
-          });
-        }
-        if (payload.facilityPolos) {
-          payload.facilityPolos.forEach((polo) => {
-            setDoc(doc(db, 'facility_polos', polo.id), sanitizeForFirestore(polo)).catch(console.warn);
-          });
-        }
-      } catch (firestoreErr) {
-        console.warn('Aviso ao sincronizar com Firestore:', firestoreErr);
+      // Publish to Firestore: write each item, delete the ones removed in the panel, and report failures
+      const writes: Promise<unknown>[] = [];
+      const put = (collectionName: string, id: string, data: unknown) =>
+        writes.push(
+          Promise.resolve().then(() =>
+            setDoc(doc(db, collectionName, id), sanitizeForFirestore(data))
+          )
+        );
+      const syncList = <T extends { id: string }>(
+        collectionName: string,
+        next: T[],
+        prev: T[],
+        onlyChanged = false
+      ) => {
+        const prevById = new Map(prev.map((item) => [item.id, JSON.stringify(item)]));
+        next.forEach((item) => {
+          if (!onlyChanged || prevById.get(item.id) !== JSON.stringify(item)) {
+            put(collectionName, item.id, item);
+          }
+        });
+        const nextIds = new Set(next.map((item) => item.id));
+        prev.forEach((item) => {
+          if (!nextIds.has(item.id)) {
+            writes.push(Promise.resolve().then(() => deleteDoc(doc(db, collectionName, item.id))));
+          }
+        });
+      };
+
+      if (payload.clubInfo !== undefined) {
+        put('club_info', 'main', normalizeClubInfo(payload.clubInfo));
+      }
+      if (payload.siteSettings !== undefined) {
+        const safeSettings = normalizeSiteSettings(payload.siteSettings);
+        put('site_settings', 'main', toPublicSiteSettings(safeSettings));
+        (Object.keys(PRIVATE_SETTINGS_COLLECTIONS) as (keyof typeof PRIVATE_SETTINGS_COLLECTIONS)[]).forEach(
+          (key) =>
+            syncList(
+              PRIVATE_SETTINGS_COLLECTIONS[key],
+              (safeSettings[key] || []) as { id: string }[],
+              (siteSettings[key] || []) as { id: string }[]
+            )
+        );
+      }
+      if (payload.newsArticles !== undefined) {
+        syncList('news_articles', normalizeNewsArticles(payload.newsArticles), newsArticles);
+      }
+      if (payload.sponsors !== undefined) {
+        syncList('sponsors', normalizeSponsors(payload.sponsors), sponsors);
+      }
+      if (payload.events !== undefined) {
+        syncList('events', normalizeEvents(payload.events), events);
+      }
+      if (payload.projects !== undefined) {
+        syncList('projects', normalizeProjects(payload.projects), projects);
+      }
+      if (payload.galleryAlbums !== undefined) {
+        syncList('gallery_albums', normalizeGalleryAlbums(payload.galleryAlbums), galleryAlbums);
+      }
+      if (payload.transparencyDocs !== undefined) {
+        syncList('transparency_docs', normalizeTransparencyDocs(payload.transparencyDocs), transparencyDocs);
+      }
+      if (payload.facilityPolos !== undefined) {
+        syncList('facility_polos', normalizeFacilityPolos(payload.facilityPolos), facilityPolos);
+      }
+      // Visitor submissions: only write what the admin changed, so demo records never get published
+      if (payload.scoutInquiries !== undefined) {
+        syncList('scout_inquiries', payload.scoutInquiries, scoutInquiries, true);
+      }
+      if (payload.rsvps !== undefined) {
+        syncList('rsvps', payload.rsvps, rsvps, true);
+      }
+      if (payload.contactMessages !== undefined) {
+        syncList('contact_messages', payload.contactMessages, contactMessages, true);
       }
 
       addAuditLog(
         'ALTERACOES_SALVAS',
         payload.logDetails || 'Alterações administrativas salvas no banco de dados e publicadas no site.'
       );
-      showToast(payload.toastMessage || 'Alterações salvas no Firestore e publicadas!');
+      Promise.allSettled(writes).then((results) => {
+        const failed = results.filter(
+          (r): r is PromiseRejectedResult => r.status === 'rejected'
+        );
+        if (failed.length === 0) {
+          showToast(payload.toastMessage || 'Alterações salvas no Firestore e publicadas!');
+          return;
+        }
+        console.warn('Firestore: falhas ao publicar alterações:', failed.map((f) => f.reason));
+        const firstReason = failed[0].reason instanceof Error ? failed[0].reason.message : String(failed[0].reason);
+        showToast(
+          `Salvo apenas neste navegador: ${failed.length} item(ns) NÃO foram publicados no site (${firstReason}). Entre com a conta Google de administrador e salve novamente.`,
+          'error'
+        );
+      });
       return true;
     } catch {
       showToast(
@@ -1691,44 +1544,22 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     <ClubDataContext.Provider
       value={{
         clubInfo,
-        setClubInfo,
         siteSettings,
-        setSiteSettings,
+        addDonationPledge,
+        addVolunteerApplication,
         newsArticles,
-        addNewsArticle,
-        updateNewsArticle,
-        deleteNewsArticle,
         sponsors,
-        addSponsor,
-        updateSponsor,
-        deleteSponsor,
         events,
-        addEvent,
-        updateEvent,
-        deleteEvent,
         rsvps,
         addRsvp,
-        deleteRsvp,
         projects,
-        addProject,
-        updateProject,
-        deleteProject,
         galleryAlbums,
-        addGalleryAlbum,
-        updateGalleryAlbum,
-        deleteGalleryAlbum,
         transparencyDocs,
-        addTransparencyDoc,
-        updateTransparencyDoc,
-        deleteTransparencyDoc,
         facilityPolos,
         scoutInquiries,
         addScoutInquiry,
-        deleteScoutInquiry,
         contactMessages,
         addContactMessage,
-        markContactMessageRead,
-        deleteContactMessage,
         auditLogs,
         addAuditLog,
         clearAuditLogs,

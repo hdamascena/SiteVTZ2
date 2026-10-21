@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-  ShieldAlert,
   ShieldCheck,
   Unlock,
-  KeyRound,
   Eye,
   EyeOff,
   LogOut,
@@ -60,15 +58,7 @@ import {
 } from '../utils/nextfitCsv.ts';
 import { AttendanceManager } from './AttendanceManager.tsx';
 import { AdminCommunityModules } from './AdminCommunityModules.tsx';
-import {
-  validateAdminCredentials,
-  isSessionValid,
-  validateSecurityPin,
-  validatePasswordStrength,
-  AdminCredentials,
-  RateLimitState,
-  AdminSession,
-} from '../utils/adminAuth.ts';
+import { isSessionValid, AdminSession } from '../utils/adminAuth.ts';
 import {
   processImageUpload,
   processAttachmentUpload,
@@ -103,12 +93,6 @@ import type {
 interface AdminPanelProps {
   onClose: () => void;
 }
-
-const DEFAULT_ADMIN_CREDS: AdminCredentials = {
-  email: 'admin@vitalizar.org.br',
-  passwordHashOrPlain: 'vitalizar2026!',
-  securityPin: '140926',
-};
 
 // ============================================================================
 // REUSABLE IMAGE UPLOAD & URL FIELD (WITH DRAG & DROP)
@@ -493,15 +477,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     }
   });
 
-  const [creds, setCreds] = useState<AdminCredentials>(() => {
-    try {
-      const saved = localStorage.getItem('vitalizar_admin_credentials');
-      return saved ? JSON.parse(saved) : DEFAULT_ADMIN_CREDS;
-    } catch {
-      return DEFAULT_ADMIN_CREDS;
-    }
-  });
-
   // Staged / Draft States (Only persisted when pressing Save)
   const [draftClubInfo, setDraftClubInfo] = useState<typeof clubInfo>(() => clubInfo);
   const [draftSiteSettings, setDraftSiteSettings] = useState<SiteSettings>(() => siteSettings);
@@ -517,7 +492,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   );
   const [draftRsvps, setDraftRsvps] = useState(() => rsvps);
   const [draftMessages, setDraftMessages] = useState(() => contactMessages);
-  const [draftCreds, setDraftCreds] = useState<AdminCredentials>(() => creds);
   const [unsavedClosePromptOpen, setUnsavedClosePromptOpen] = useState(false);
   const [firebaseUser, setFirebaseUser] = useState(auth.currentUser);
   const [isAuthenticatingFirebase, setIsAuthenticatingFirebase] = useState(false);
@@ -559,43 +533,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   useEffect(() => {
     setDraftMessages(contactMessages);
   }, [contactMessages]);
-  useEffect(() => {
-    setDraftCreds(creds);
-  }, [creds]);
-
-  // Listen to Firebase Auth state and verify if user has administrative privileges
+  // Listen to Firebase Auth state: the panel stays open only while an authorized Firebase admin is signed in
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       setFirebaseUser(user);
-      if (user) {
-        const authCheck = await verifyFirebaseAdminAccess(user, creds.email);
-        if (authCheck.authorized) {
-          setSession((prev) => {
-            if (prev && isSessionValid(prev)) return prev;
-            const now = Date.now();
-            const newSession: AdminSession = {
-              token: `FB-ADM-${Math.random().toString(36).slice(2, 10).toUpperCase()}-${now.toString(36).toUpperCase()}`,
-              loginTime: now,
-              expiresAt: now + 2 * 60 * 60 * 1000,
-              adminEmail: user.email || creds.email,
-            };
-            sessionStorage.setItem('vitalizar_admin_session', JSON.stringify(newSession));
-            return newSession;
-          });
-        }
+      const authCheck = user ? await verifyFirebaseAdminAccess(user) : null;
+      if (!user || !authCheck?.authorized) {
+        setSession(null);
+        sessionStorage.removeItem('vitalizar_admin_session');
+        return;
       }
+      setSession((prev) => {
+        if (prev && isSessionValid(prev)) return prev;
+        const now = Date.now();
+        const newSession: AdminSession = {
+          token: `FB-ADM-${Math.random().toString(36).slice(2, 10).toUpperCase()}-${now.toString(36).toUpperCase()}`,
+          loginTime: now,
+          expiresAt: now + 2 * 60 * 60 * 1000,
+          adminEmail: user.email || '',
+        };
+        sessionStorage.setItem('vitalizar_admin_session', JSON.stringify(newSession));
+        return newSession;
+      });
     });
     return () => unsubscribe();
-  }, [creds.email]);
-
-  const [rateLimit, setRateLimit] = useState<RateLimitState>(() => {
-    try {
-      const saved = localStorage.getItem('vitalizar_admin_ratelimit');
-      return saved ? JSON.parse(saved) : { failedAttempts: 0, lockedUntil: null };
-    } catch {
-      return { failedAttempts: 0, lockedUntil: null };
-    }
-  });
+  }, []);
 
   // Login Form State
   const [loginEmail, setLoginEmail] = useState('');
@@ -619,7 +581,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     | 'inscricoes'
     | 'comunidade_pix'
     | 'mensagens'
-    | 'seguranca'
     | 'backup'
   >('dashboard');
 
@@ -717,8 +678,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   const [msgSearch, setMsgSearch] = useState('');
   const [msgStatusFilter, setMsgStatusFilter] = useState<'all' | 'unread' | 'read'>('all');
 
-  const [showAdminNewPassword, setShowAdminNewPassword] = useState(false);
-  const [showAdminPin, setShowAdminPin] = useState(false);
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [importJsonError, setImportJsonError] = useState<string | null>(null);
@@ -741,12 +700,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     }>
   >([]);
 
-  // Security confirmation PIN modal
-  const [pinPromptOpen, setPinPromptOpen] = useState(false);
-  const [pinAction, setPinAction] = useState<(() => void) | null>(null);
-  const [inputPin, setInputPin] = useState('');
-  const [pinError, setPinError] = useState(false);
-
   // Dirty / Unsaved Changes Detection
   const isClubInfoDirty = JSON.stringify(draftClubInfo) !== JSON.stringify(clubInfo);
   const isSiteSettingsDirty = JSON.stringify(draftSiteSettings) !== JSON.stringify(siteSettings);
@@ -761,7 +714,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     JSON.stringify(draftScoutInquiries) !== JSON.stringify(scoutInquiries);
   const isRsvpsDirty = JSON.stringify(draftRsvps) !== JSON.stringify(rsvps);
   const isMessagesDirty = JSON.stringify(draftMessages) !== JSON.stringify(contactMessages);
-  const isCredsDirty = JSON.stringify(draftCreds) !== JSON.stringify(creds);
   const hasOpenModalDraft = Boolean(
     editingNews ||
       editingSponsor ||
@@ -787,7 +739,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     isScoutInquiriesDirty ||
     isRsvpsDirty ||
     isMessagesDirty ||
-    isCredsDirty ||
     hasOpenModalDraft;
 
   const handleDiscardAllChanges = () => {
@@ -803,7 +754,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     setDraftScoutInquiries(scoutInquiries);
     setDraftRsvps(rsvps);
     setDraftMessages(contactMessages);
-    setDraftCreds(creds);
     setEditingNews(null);
     setIsCreatingNews(false);
     setEditingSponsor(null);
@@ -1098,26 +1048,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
       setIsCreatingRsvp(false);
     }
 
-    // 7. Validate & Commit Security Credentials if changed
-    if (isCredsDirty) {
-      if (!draftCreds.email.trim() || !draftCreds.email.includes('@')) {
-        showToast('Informe um e-mail institucional válido na aba Segurança.', 'error');
-        return false;
-      }
-      const pwdCheck = validatePasswordStrength(draftCreds.passwordHashOrPlain);
-      if (!pwdCheck.valid) {
-        showToast(pwdCheck.reason || 'Senha fraca.', 'error');
-        return false;
-      }
-      if (!/^\d{6}$/.test(draftCreds.securityPin.trim())) {
-        showToast('O PIN de segurança deve conter exatamente 6 dígitos numéricos.', 'error');
-        return false;
-      }
-      setCreds(draftCreds);
-      localStorage.setItem('vitalizar_admin_credentials', JSON.stringify(draftCreds));
-    }
-
-    // 8. Persist all data to ClubDataContext, localStorage and Firestore
+    // 7. Persist all data to ClubDataContext, localStorage and Firestore
     const savedOk = saveAdminChanges({
       clubInfo: draftClubInfo,
       siteSettings: draftSiteSettings,
@@ -1163,50 +1094,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     setIsAuthenticatingFirebase(true);
 
     try {
-      // 1. Attempt Firebase Email/Password Authentication first if configured
-      try {
-        const fbUser = await loginWithEmailPasswordFirebase(loginEmail, loginPass);
-        if (fbUser) {
-          const authCheck = await verifyFirebaseAdminAccess(fbUser, creds.email);
-          if (!authCheck.authorized) {
-            await logoutFirebaseAdmin();
-            setLoginError(
-              authCheck.reason ||
-                `Acesso restrito: a conta "${fbUser.email}" não possui credenciais administrativas autorizadas.`
-            );
-            return;
-          }
-          const now = Date.now();
-          const fbSession: AdminSession = {
-            token: `FB-ADM-${Math.random().toString(36).slice(2, 10).toUpperCase()}-${now.toString(36).toUpperCase()}`,
-            loginTime: now,
-            expiresAt: now + 2 * 60 * 60 * 1000,
-            adminEmail: fbUser.email || loginEmail.trim(),
-          };
-          const resetLimit = { failedAttempts: 0, lockedUntil: null };
-          setRateLimit(resetLimit);
-          localStorage.setItem('vitalizar_admin_ratelimit', JSON.stringify(resetLimit));
-          setSession(fbSession);
-          sessionStorage.setItem('vitalizar_admin_session', JSON.stringify(fbSession));
-          showToast('Autenticado via Firebase Auth! Bem-vindo ao Painel Vitalizar.', 'success');
-          return;
-        }
-      } catch {
-        // Fallback to institutional admin credentials check
+      // Firebase Auth is the only gate: firestore.rules reject writes from anyone else anyway
+      const fbUser = await loginWithEmailPasswordFirebase(loginEmail, loginPass);
+      if (!fbUser) {
+        setLoginError('E-mail ou senha inválidos (conta Firebase). Você também pode entrar com a conta Google.');
+        return;
       }
-
-      // 2. Institutional Admin Credentials Validation with Rate Limiting
-      const result = validateAdminCredentials(loginEmail, loginPass, creds, rateLimit);
-      setRateLimit(result.updatedRateLimit);
-      localStorage.setItem('vitalizar_admin_ratelimit', JSON.stringify(result.updatedRateLimit));
-
-      if (result.success && result.session) {
-        setSession(result.session);
-        sessionStorage.setItem('vitalizar_admin_session', JSON.stringify(result.session));
-        showToast('Bem-vindo ao Painel de Controle Vitalizar!', 'success');
-      } else {
-        setLoginError(result.reason || 'Credenciais administrativas inválidas.');
+      const authCheck = await verifyFirebaseAdminAccess(fbUser);
+      if (!authCheck.authorized) {
+        await logoutFirebaseAdmin();
+        setLoginError(
+          authCheck.reason ||
+            `Acesso restrito: a conta "${fbUser.email}" não possui credenciais administrativas autorizadas.`
+        );
+        return;
       }
+      const now = Date.now();
+      const fbSession: AdminSession = {
+        token: `FB-ADM-${Math.random().toString(36).slice(2, 10).toUpperCase()}-${now.toString(36).toUpperCase()}`,
+        loginTime: now,
+        expiresAt: now + 2 * 60 * 60 * 1000,
+        adminEmail: fbUser.email || loginEmail.trim(),
+      };
+      setSession(fbSession);
+      sessionStorage.setItem('vitalizar_admin_session', JSON.stringify(fbSession));
+      showToast('Autenticado via Firebase Auth! Bem-vindo ao Painel Vitalizar.', 'success');
     } finally {
       setIsAuthenticatingFirebase(false);
     }
@@ -1218,7 +1130,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     try {
       const user = await loginWithGoogleAdmin();
       if (user) {
-        const authCheck = await verifyFirebaseAdminAccess(user, creds.email);
+        const authCheck = await verifyFirebaseAdminAccess(user);
         if (!authCheck.authorized) {
           await logoutFirebaseAdmin();
           setLoginError(
@@ -1232,11 +1144,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
           token: `FB-GGL-${Math.random().toString(36).slice(2, 10).toUpperCase()}-${now.toString(36).toUpperCase()}`,
           loginTime: now,
           expiresAt: now + 2 * 60 * 60 * 1000,
-          adminEmail: user.email || creds.email,
+          adminEmail: user.email || '',
         };
-        const resetLimit = { failedAttempts: 0, lockedUntil: null };
-        setRateLimit(resetLimit);
-        localStorage.setItem('vitalizar_admin_ratelimit', JSON.stringify(resetLimit));
         setSession(googleSession);
         sessionStorage.setItem('vitalizar_admin_session', JSON.stringify(googleSession));
         showToast(`Autenticado no Firebase como ${user.email}!`, 'success');
@@ -1260,22 +1169,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     showToast('Sessão administrativa encerrada com segurança.');
   };
 
-  const requestPinProtectedAction = (action: () => void) => {
-    setPinAction(() => action);
-    setInputPin('');
-    setPinError(false);
-    setPinPromptOpen(true);
-  };
-
-  const handleConfirmPin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (validateSecurityPin(inputPin, creds.securityPin)) {
-      setPinPromptOpen(false);
-      if (pinAction) pinAction();
-      setPinAction(null);
-    } else {
-      setPinError(true);
-    }
+  // Destructive actions still ask for confirmation; access control is Firebase Auth + firestore.rules
+  const requestConfirmedAction = (action: () => void) => {
+    if (window.confirm('Confirma esta ação? Ela remove ou redefine dados.')) action();
   };
 
   // Helper for uploading a file directly to a Transparency Document (draft only)
@@ -1338,8 +1234,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   // 1. LOGIN SCREEN (PROTECTION GATE)
   // =========================================================================
   if (!session) {
-    const isLocked = rateLimit.lockedUntil && Date.now() < rateLimit.lockedUntil;
-    const remainingSec = isLocked ? Math.ceil((rateLimit.lockedUntil! - Date.now()) / 1000) : 0;
 
     return (
       <div className="fixed inset-0 z-50 overflow-y-auto bg-gradient-to-br from-[#061424] via-[#0a1e36] to-[#040d18] flex items-center justify-center p-4">
@@ -1383,19 +1277,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
               </div>
             )}
 
-            {isLocked ? (
-              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-center space-y-2 text-xs text-amber-800">
-                <ShieldAlert className="w-8 h-8 text-amber-600 mx-auto animate-pulse" />
-                <h3 className="font-bold text-sm">Acesso Temporariamente Bloqueado</h3>
-                <p>
-                  Por medidas de segurança contra invasões e força bruta, o acesso está suspenso.
-                </p>
-                <div className="font-mono text-base font-black text-amber-900 bg-amber-100/70 p-2 rounded-lg">
-                  Aguarde {remainingSec} segundos
-                </div>
-              </div>
-            ) : (
-              <form onSubmit={handleLogin} className="space-y-4">
+            <form onSubmit={handleLogin} className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
                     E-mail Institucional *
@@ -1465,24 +1347,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                   <span>Entrar com Conta Google Admin (Firebase)</span>
                 </button>
               </form>
-            )}
 
-            {/* Quick Helper for Demo credentials */}
-            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+            <div className="pt-2 border-t border-slate-100 flex items-center text-[11px] text-slate-500">
               <span className="flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Acesso Restrito a Administradores</span>
               </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setLoginEmail(creds.email || 'admin@vitalizar.org.br');
-                  setLoginPass(creds.passwordHashOrPlain || 'vitalizar2026!');
-                }}
-                className="text-[#0284c7] hover:underline font-bold cursor-pointer"
-              >
-                Preencher Credencial Admin
-              </button>
             </div>
           </div>
         </div>
@@ -1713,7 +1583,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                     icon: Mail,
                     badge: draftMessages.filter((m) => !m.read).length || null,
                   },
-                  { id: 'seguranca', label: 'Segurança & Acesso', icon: KeyRound, badge: isCredsDirty ? '•' : null },
                   { id: 'backup', label: 'Importação & Backup', icon: FileSpreadsheet, badge: null },
                 ],
               },
@@ -3920,7 +3789,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                           </button>
                           <button
                             onClick={() => {
-                              requestPinProtectedAction(() => {
+                              requestConfirmedAction(() => {
                                 setDraftNews((prev) => prev.filter((item) => item.id !== article.id));
                                 showToast(
                                   'Remoção marcada no rascunho. Clique em "Salvar Alterações" para confirmar.',
@@ -4450,7 +4319,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                           <button
                             type="button"
                             onClick={() => {
-                              requestPinProtectedAction(() => {
+                              requestConfirmedAction(() => {
                                 setDraftSponsors((prev) => prev.filter((item) => item.id !== spon.id));
                                 showToast(
                                   `Remoção de "${spon.name}" marcada no rascunho. Clique em Salvar para persistir.`,
@@ -5075,7 +4944,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                             </button>
                             <button
                               onClick={() => {
-                                requestPinProtectedAction(() => {
+                                requestConfirmedAction(() => {
                                   setDraftEvents((prev) => prev.filter((item) => item.id !== ev.id));
                                   showToast(
                                     'Remoção marcada no rascunho. Clique em "Salvar Alterações" para confirmar.',
@@ -5377,7 +5246,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                           </button>
                           <button
                             onClick={() => {
-                              requestPinProtectedAction(() => {
+                              requestConfirmedAction(() => {
                                 setDraftProjects((prev) => prev.filter((p) => p.id !== proj.id));
                                 showToast(
                                   'Remoção marcada no rascunho. Clique em "Salvar Alterações" para confirmar.',
@@ -6116,7 +5985,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                         </button>
                         <button
                           onClick={() => {
-                            requestPinProtectedAction(() => {
+                            requestConfirmedAction(() => {
                               setDraftAlbums((prev) => prev.filter((a) => a.id !== album.id));
                               showToast(
                                 'Remoção marcada no rascunho. Clique em "Salvar Alterações" para confirmar.',
@@ -7042,7 +6911,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                             </button>
                             <button
                               onClick={() => {
-                                requestPinProtectedAction(() => {
+                                requestConfirmedAction(() => {
                                   setDraftDocs((prev) => prev.filter((d) => d.id !== doc.id));
                                   showToast(
                                     'Remoção marcada no rascunho. Clique em "Salvar Alterações" para confirmar.',
@@ -7392,7 +7261,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                               </button>
                               <button
                                 onClick={() => {
-                                  requestPinProtectedAction(() => {
+                                  requestConfirmedAction(() => {
                                     setDraftRsvps((prev) => prev.filter((item) => item.id !== r.id));
                                     setDraftEvents((prev) =>
                                       prev.map((ev) =>
@@ -7750,7 +7619,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                             {draftPolos.length > 1 && (
                               <button
                                 onClick={() => {
-                                  requestPinProtectedAction(() => {
+                                  requestConfirmedAction(() => {
                                     setDraftPolos((prev) => prev.filter((p) => p.id !== polo.id));
                                     showToast(
                                       'Polo removido no rascunho. Clique em "Salvar Alterações" para confirmar.',
@@ -8586,142 +8455,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
           })()}
 
           {/* ========================================================================= */}
-          {/* TAB 10: SEGURANÇA & SENHA (WITH VALIDATION & SHOW/HIDE TOGGLES) */}
-          {/* ========================================================================= */}
-          {activeTab === 'seguranca' && (() => {
-            const pwdStrength = validatePasswordStrength(draftCreds.passwordHashOrPlain);
-            const pinValid = /^\d{6}$/.test(draftCreds.securityPin.trim());
-
-            return (
-              <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-xs space-y-6 max-w-2xl">
-                <div>
-                  <span className="text-xs font-bold text-[#0284c7] uppercase tracking-wider">
-                    Proteção de Acesso
-                  </span>
-                  <h2 className="text-xl font-black text-[#0a1e36] uppercase mt-0.5">
-                    Credenciais Administrativas & PIN
-                  </h2>
-                  <p className="text-xs text-slate-600 mt-1">
-                    Atualize o e-mail de acesso, senha mestre ou o PIN de segurança para ações críticas. As alterações só serão efetivadas ao clicar em Salvar.
-                  </p>
-                </div>
-
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleSaveAllAdminChanges('Credenciais de segurança salvas com sucesso!');
-                  }}
-                  className="space-y-4"
-                >
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                      E-mail do Administrador *
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      value={draftCreds.email}
-                      onChange={(e) => setDraftCreds({ ...draftCreds, email: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                      Senha do Administrador *
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showAdminNewPassword ? 'text' : 'password'}
-                        value={draftCreds.passwordHashOrPlain}
-                        onChange={(e) =>
-                          setDraftCreds({ ...draftCreds, passwordHashOrPlain: e.target.value })
-                        }
-                        className="w-full text-xs p-2.5 pr-10 bg-slate-50 border border-slate-300 rounded-lg font-mono"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowAdminNewPassword(!showAdminNewPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
-                      >
-                        {showAdminNewPassword ? (
-                          <EyeOff className="w-4 h-4" />
-                        ) : (
-                          <Eye className="w-4 h-4" />
-                        )}
-                      </button>
-                    </div>
-                    <span
-                      className={`text-[11px] mt-1 block font-medium ${
-                        pwdStrength.valid ? 'text-emerald-600' : 'text-amber-700'
-                      }`}
-                    >
-                      {pwdStrength.valid
-                        ? '✓ Senha forte (atende aos requisitos de letras e números).'
-                        : pwdStrength.reason}
-                    </span>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                      PIN de Segurança (6 dígitos numéricos para exclusões críticas) *
-                    </label>
-                    <div className="relative w-52">
-                      <input
-                        type={showAdminPin ? 'text' : 'password'}
-                        maxLength={6}
-                        value={draftCreds.securityPin}
-                        onChange={(e) =>
-                          setDraftCreds({
-                            ...draftCreds,
-                            securityPin: e.target.value.replace(/\D/g, ''),
-                          })
-                        }
-                        className="w-full text-center text-sm p-2 pr-9 bg-slate-50 border border-slate-300 rounded-lg font-mono tracking-widest"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowAdminPin(!showAdminPin)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
-                      >
-                        {showAdminPin ? (
-                          <EyeOff className="w-4 h-4" />
-                        ) : (
-                          <Eye className="w-4 h-4" />
-                        )}
-                      </button>
-                    </div>
-                    {!pinValid && (
-                      <span className="text-[11px] text-amber-700 mt-1 block">
-                        O PIN deve conter exatamente 6 números.
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="pt-2 flex items-center gap-2">
-                    {isCredsDirty && (
-                      <button
-                        type="button"
-                        onClick={() => setDraftCreds(creds)}
-                        className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase rounded-xl cursor-pointer"
-                      >
-                        Descartar
-                      </button>
-                    )}
-                    <button
-                      type="submit"
-                      className="px-6 py-2.5 bg-[#0284c7] hover:bg-[#0369a1] text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
-                    >
-                      <Save className="w-4 h-4" />
-                      <span>Salvar Alterações de Segurança</span>
-                    </button>
-                  </div>
-                </form>
-              </div>
-            );
-          })()}
-
-          {/* ========================================================================= */}
           {/* TAB 10B: CHAVE PIX (CNPJ), RESULTADOS DA BASE, TROFÉUS & VOLUNTARIADO */}
           {/* ========================================================================= */}
           {activeTab === 'comunidade_pix' && (
@@ -8904,7 +8637,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                     </div>
                     <button
                       onClick={() => {
-                        requestPinProtectedAction(() => {
+                        requestConfirmedAction(() => {
                           resetAllToDefaults();
                         });
                       }}
@@ -9452,66 +9185,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
                 <span>Salvar e Sair</span>
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* SECURITY PIN CONFIRMATION MODAL */}
-      {/* ========================================================================= */}
-      {pinPromptOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4 text-center">
-            <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
-              <KeyRound className="w-6 h-6" />
-            </div>
-
-            <div>
-              <h3 className="font-black text-sm text-[#0a1e36] uppercase">
-                Confirmação de Segurança
-              </h3>
-              <p className="text-xs text-slate-500 mt-1">
-                Esta é uma ação protegida. Digite o PIN mestre de 6 dígitos para autorizar:
-              </p>
-            </div>
-
-            {pinError && (
-              <div className="text-xs font-bold text-rose-600 bg-rose-50 p-2 rounded-lg">
-                PIN incorreto! Verifique o código cadastrado.
-              </div>
-            )}
-
-            <form onSubmit={handleConfirmPin} className="space-y-4">
-              <input
-                type="password"
-                required
-                maxLength={6}
-                autoFocus
-                value={inputPin}
-                onChange={(e) => {
-                  setInputPin(e.target.value);
-                  setPinError(false);
-                }}
-                placeholder="••••••"
-                className="w-full text-center text-lg tracking-widest font-mono p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none"
-              />
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPinPromptOpen(false)}
-                  className="flex-1 py-2 bg-slate-200 text-slate-700 text-xs font-bold uppercase rounded-lg cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 bg-[#0a1e36] hover:bg-[#0284c7] text-white text-xs font-bold uppercase rounded-lg cursor-pointer"
-                >
-                  Confirmar
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

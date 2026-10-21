@@ -106,6 +106,46 @@ service cloud.firestore {
              data.seoTitle is string && data.seoTitle.size() <= 200;
     }
 
+    function isValidPolo(data) {
+      return data.name is string && data.name.size() >= 2 && data.name.size() <= 200;
+    }
+
+    function isValidScoutInquiry(data) {
+      return data.scoutName is string && data.scoutName.size() >= 2 && data.scoutName.size() <= 150 &&
+             data.organization is string && data.organization.size() <= 150 &&
+             data.role is string && data.role.size() <= 100 &&
+             data.phone is string && data.phone.size() <= 40 &&
+             data.email is string && data.email.size() <= 120 &&
+             data.inquiryType in ['avaliacao_clube', 'visita_treino', 'relatorio_atleta', 'parceria_base'] &&
+             data.targetCategory is string && data.targetCategory.size() <= 100 &&
+             data.message is string && data.message.size() <= 3000 &&
+             data.protocol is string && data.protocol.size() <= 50 &&
+             data.createdAt is string && data.createdAt.size() <= 60 &&
+             data.status == 'nova';
+    }
+
+    function isValidPledge(data) {
+      return data.donorName is string && data.donorName.size() >= 1 && data.donorName.size() <= 150 &&
+             data.amount is number && data.amount > 0 && data.amount <= 1000000 &&
+             data.purpose is string && data.purpose.size() <= 150 &&
+             data.date is string && data.date.size() <= 60 &&
+             data.protocol is string && data.protocol.size() <= 50 &&
+             (!('message' in data) || (data.message is string && data.message.size() <= 1000)) &&
+             data.status == 'registrado';
+    }
+
+    function isValidVolunteer(data) {
+      return data.name is string && data.name.size() >= 2 && data.name.size() <= 150 &&
+             data.area is string && data.area.size() <= 80 &&
+             data.availability is string && data.availability.size() <= 300 &&
+             data.experience is string && data.experience.size() <= 2000 &&
+             data.contactInfo is string && data.contactInfo.size() <= 300 &&
+             data.motivation is string && data.motivation.size() <= 3000 &&
+             data.protocol is string && data.protocol.size() <= 50 &&
+             data.createdAt is string && data.createdAt.size() <= 60 &&
+             data.status == 'novo';
+    }
+
     // 1. Institutional Club Info
     match /club_info/{infoId} {
       allow get, list: if true;
@@ -162,16 +202,47 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(docId);
     }
 
+    // 6b. Facility Polos (spaces shown on the site)
+    match /facility_polos/{poloId} {
+      allow get, list: if true;
+      allow create, update: if isAdmin() && isValidId(poloId) && isValidPolo(incoming());
+      allow delete: if isAdmin() && isValidId(poloId);
+    }
+
     // 7. RSVPs and Registrations
     match /rsvps/{rsvpId} {
-      allow create: if isValidId(rsvpId) && isValidRsvp(incoming());
+      allow create: if isValidId(rsvpId) && (isAdmin() || isValidRsvp(incoming()));
       allow get, list, update, delete: if isAdmin();
     }
 
     // 8. Contact & Ombudsman Messages
     match /contact_messages/{messageId} {
-      allow create: if isValidId(messageId) && isValidMessage(incoming());
+      allow create: if isValidId(messageId) && (isAdmin() || isValidMessage(incoming()));
       allow get, list, update, delete: if isAdmin();
+    }
+
+    // 8b. Scout / Talent Inquiries
+    match /scout_inquiries/{inquiryId} {
+      allow create: if isValidId(inquiryId) && (isAdmin() || isValidScoutInquiry(incoming()));
+      allow get, list, update, delete: if isAdmin();
+    }
+
+    // 8c. PIX Donation Pledges (donor names and amounts stay private)
+    match /donation_pledges/{pledgeId} {
+      allow create: if isValidId(pledgeId) && (isAdmin() || isValidPledge(incoming()));
+      allow get, list, update, delete: if isAdmin();
+    }
+
+    // 8d. Volunteer Applications (contact details stay private)
+    match /volunteer_applications/{applicationId} {
+      allow create: if isValidId(applicationId) && (isAdmin() || isValidVolunteer(incoming()));
+      allow get, list, update, delete: if isAdmin();
+    }
+
+    // 8e. Project Attendance Sessions (minors' attendance, admin only)
+    match /attendance_sessions/{sessionId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if isAdmin() && isValidId(sessionId);
     }
 
     // 9. Audit Logs
