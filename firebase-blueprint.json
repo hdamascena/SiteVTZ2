@@ -1,0 +1,259 @@
+{
+  "entities": {
+    "ClubInfo": {
+      "title": "ClubInfo",
+      "description": "Institutional information, address, and contact details of Associação Vitalizar",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 200 },
+        "tradeName": { "type": "string", "maxLength": 100 },
+        "cnpj": { "type": "string", "maxLength": 30 },
+        "president": { "type": "string", "maxLength": 100 },
+        "legalCounsel": { "type": "string", "maxLength": 150 },
+        "address": { "type": "string", "maxLength": 300 },
+        "cep": { "type": "string", "maxLength": 20 },
+        "municipality": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "format": "email", "maxLength": 120 }
+      },
+      "required": ["fullName", "tradeName", "cnpj", "president", "address", "email"]
+    },
+    "NewsArticle": {
+      "title": "NewsArticle",
+      "description": "Editorial news article or official communication",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "minLength": 3, "maxLength": 200 },
+        "date": { "type": "string", "maxLength": 60 },
+        "category": { "type": "string", "maxLength": 60 },
+        "summary": { "type": "string", "maxLength": 500 },
+        "imageUrl": { "type": "string", "maxLength": 2000 },
+        "author": { "type": "string", "maxLength": 100 },
+        "views": { "type": "number" }
+      },
+      "required": ["title", "category", "summary", "imageUrl", "author"]
+    },
+    "VitalizarEvent": {
+      "title": "VitalizarEvent",
+      "description": "Sports clinic, community workshop or tournament event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "minLength": 3, "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 60 },
+        "categoryLabel": { "type": "string", "maxLength": 60 },
+        "date": { "type": "string", "maxLength": 30 },
+        "formattedDate": { "type": "string", "maxLength": 60 },
+        "dayNumber": { "type": "string", "maxLength": 10 },
+        "monthShort": { "type": "string", "maxLength": 10 },
+        "time": { "type": "string", "maxLength": 60 },
+        "location": { "type": "string", "maxLength": 200 },
+        "address": { "type": "string", "maxLength": 300 },
+        "targetAudience": { "type": "string", "maxLength": 150 },
+        "coordinator": { "type": "string", "maxLength": 100 },
+        "capacity": { "type": "number" },
+        "availableSpots": { "type": "number" },
+        "isFree": { "type": "boolean" },
+        "description": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["title", "category", "date", "time", "location", "capacity", "availableSpots"]
+    },
+    "VitalizarProject": {
+      "title": "VitalizarProject",
+      "description": "Social sporting project or continuous development program",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "minLength": 3, "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 60 },
+        "targetAudience": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "schedule": { "type": "string", "maxLength": 150 },
+        "location": { "type": "string", "maxLength": 200 },
+        "coordinator": { "type": "string", "maxLength": 100 },
+        "fundingSource": { "type": "string", "maxLength": 200 },
+        "imageUrl": { "type": "string", "maxLength": 2000 }
+      },
+      "required": ["name", "category", "targetAudience", "description", "location", "coordinator"]
+    },
+    "GalleryAlbum": {
+      "title": "GalleryAlbum",
+      "description": "Photo album documenting sports activities and community events",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "minLength": 3, "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 60 },
+        "date": { "type": "string", "maxLength": 60 },
+        "location": { "type": "string", "maxLength": 200 },
+        "coverUrl": { "type": "string", "maxLength": 2000 },
+        "caption": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["title", "category", "date", "coverUrl"]
+    },
+    "TransparencyDocument": {
+      "title": "TransparencyDocument",
+      "description": "Official legal document, statute, accountability report or certificate under MROSC",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "minLength": 3, "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 60 },
+        "date": { "type": "string", "maxLength": 30 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "fileType": { "type": "string", "maxLength": 20 },
+        "badge": { "type": "string", "maxLength": 50 },
+        "fileName": { "type": "string", "maxLength": 255 },
+        "fileSize": { "type": "string", "maxLength": 50 },
+        "downloadUrl": { "type": "string", "maxLength": 2000 }
+      },
+      "required": ["title", "category", "date", "fileType", "badge"]
+    },
+    "Rsvp": {
+      "title": "Rsvp",
+      "description": "Registration for an event, clinic, or sport modality",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "eventId": { "type": "string", "maxLength": 128 },
+        "eventTitle": { "type": "string", "maxLength": 200 },
+        "name": { "type": "string", "minLength": 2, "maxLength": 150 },
+        "phone": { "type": "string", "minLength": 8, "maxLength": 40 },
+        "spots": { "type": "number" },
+        "confirmationCode": { "type": "string", "maxLength": 50 },
+        "date": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["eventId", "eventTitle", "name", "phone", "spots", "confirmationCode"]
+    },
+    "ContactMessage": {
+      "title": "ContactMessage",
+      "description": "Message submitted via the contact or ombudsman form",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "minLength": 2, "maxLength": 150 },
+        "email": { "type": "string", "format": "email", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "subject": { "type": "string", "maxLength": 120 },
+        "message": { "type": "string", "minLength": 3, "maxLength": 3000 },
+        "date": { "type": "string", "maxLength": 40 },
+        "read": { "type": "boolean" }
+      },
+      "required": ["name", "email", "phone", "subject", "message"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Administrative audit trail entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "action": { "type": "string", "maxLength": 100 },
+        "timestamp": { "type": "string", "maxLength": 50 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "adminEmail": { "type": "string", "maxLength": 120 }
+      },
+      "required": ["action", "timestamp"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized administrator user profile",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin", "editor"] },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["email", "role"]
+    },
+    "Sponsor": {
+      "title": "Sponsor",
+      "description": "Club sponsor, institutional partner, or supporter",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "minLength": 2, "maxLength": 150 },
+        "tier": { "type": "string", "enum": ["master", "ouro", "prata", "bronze", "apoio"] },
+        "tierLabel": { "type": "string", "maxLength": 60 },
+        "logoUrl": { "type": "string", "maxLength": 2000 },
+        "websiteUrl": { "type": "string", "maxLength": 500 },
+        "description": { "type": "string", "maxLength": 500 },
+        "category": { "type": "string", "maxLength": 100 },
+        "active": { "type": "boolean" },
+        "order": { "type": "number" }
+      },
+      "required": ["name", "tier", "logoUrl", "active"]
+    },
+    "SiteSettings": {
+      "title": "SiteSettings",
+      "description": "Global site configuration including dynamic categories, tags, search suggestions, and announcement banner",
+      "type": "object",
+      "properties": {
+        "newsCategories": { "type": "array", "items": { "type": "string" } },
+        "projectCategories": { "type": "array", "items": { "type": "string" } },
+        "galleryCategories": { "type": "array", "items": { "type": "string" } },
+        "sponsorCategories": { "type": "array", "items": { "type": "string" } },
+        "contactSubjects": { "type": "array", "items": { "type": "string" } },
+        "siteTags": { "type": "array", "items": { "type": "string" } },
+        "searchSuggestions": { "type": "array", "items": { "type": "string" } },
+        "seoTitle": { "type": "string", "maxLength": 200 },
+        "seoDescription": { "type": "string", "maxLength": 500 },
+        "whatsappNumber": { "type": "string", "maxLength": 30 },
+        "enableRegistrations": { "type": "boolean" },
+        "enableSponsorsSection": { "type": "boolean" }
+      },
+      "required": ["newsCategories", "siteTags"]
+    }
+  },
+  "firestore": {
+    "/club_info/{infoId}": {
+      "schema": "ClubInfo",
+      "description": "Institutional information and contact details of Associação Vitalizar"
+    },
+    "/site_settings/{settingId}": {
+      "schema": "SiteSettings",
+      "description": "Global site categories, tags, SEO, and operational flags"
+    },
+    "/news_articles/{articleId}": {
+      "schema": "NewsArticle",
+      "description": "News articles, announcements, and press releases"
+    },
+    "/sponsors/{sponsorId}": {
+      "schema": "Sponsor",
+      "description": "Sponsors and institutional partners of Associação Vitalizar"
+    },
+    "/events/{eventId}": {
+      "schema": "VitalizarEvent",
+      "description": "Sports clinics, community workshops, and association meetings"
+    },
+    "/projects/{projectId}": {
+      "schema": "VitalizarProject",
+      "description": "Ongoing sports programs and social projects"
+    },
+    "/gallery_albums/{albumId}": {
+      "schema": "GalleryAlbum",
+      "description": "Photo albums and event media coverage"
+    },
+    "/transparency_docs/{docId}": {
+      "schema": "TransparencyDocument",
+      "description": "Official documents, statutes, and accountability reports under MROSC"
+    },
+    "/rsvps/{rsvpId}": {
+      "schema": "Rsvp",
+      "description": "Registrations and RSVPs for events and sporting modalities"
+    },
+    "/contact_messages/{messageId}": {
+      "schema": "ContactMessage",
+      "description": "Inquiries and ombudsman messages sent by citizens"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Administrative audit trail logs"
+    },
+    "/admins/{adminId}": {
+      "schema": "AdminUser",
+      "description": "List of authorized administrator user accounts"
+    }
+  }
+}
+

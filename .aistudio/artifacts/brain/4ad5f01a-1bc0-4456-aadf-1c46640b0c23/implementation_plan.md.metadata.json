@@ -1,0 +1,6 @@
+{
+  "summary":  "Plano de implementação revisado para importação de atletas/participantes do Next Fit via arquivo .CSV (sem dados de contato pessoal), com aba separada de Participantes dentro de Projetos e central de Importação de Dados (.CSV Next Fit) no Painel do Administrador.",
+  "updatedAt":  "2026-10-20T21:41:01.128168561Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

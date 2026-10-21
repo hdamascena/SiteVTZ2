@@ -1,0 +1,8 @@
+{
+  "name": "Remix Associação Esportiva Vitalizar",
+  "description": "Portal oficial da Associação Esportiva Vitalizar (CNPJ: 63.083.068/0001-00) em Cariacica/ES. Projetos esportivos, formação de atletas, saúde, cultura, inclusão e transparência pública.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
