@@ -8,6 +8,8 @@ import {
   ExternalLink,
   Save,
   Eye,
+  Upload,
+  FileSpreadsheet,
 } from 'lucide-react';
 import type { AdminSectionId, AdminUserProfile } from '../types.ts';
 import { canDeleteRecords } from '../permissions.ts';
@@ -21,10 +23,23 @@ import type {
   FacilityPolo,
   TransparencyDocument,
 } from '../../types/index.ts';
-import { CampoTexto } from '../components/CampoTexto.tsx';
+import {
+  CampoTexto,
+  CampoUploadImagem,
+  CampoUploadDocumento,
+  CampoUploadMultiplasFotos,
+  CampoUploadAnexos,
+} from '../components/CampoTexto.tsx';
 import { Tabela, type ColunaTabela } from '../components/Tabela.tsx';
 import { PainelLateral } from '../components/PainelLateral.tsx';
 import { ConfirmarExclusao } from '../components/ConfirmarExclusao.tsx';
+import {
+  processImageUpload,
+  processAttachmentUpload,
+  TRANSPARENCY_FINANCE_SAMPLE_CSV,
+  parseTransparencyFinancialCsv,
+  downloadCsvTemplate,
+} from '../../utils/fileUpload.ts';
 
 export type ConteudoSection = Extract<
   AdminSectionId,
@@ -389,8 +404,8 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                   }
                 />
               </div>
-              <CampoTexto
-                label="URL da Imagem de Capa"
+              <CampoUploadImagem
+                label="Imagem de Capa do Projeto"
                 disabled={isReadOnly}
                 value={draftProject.imageUrl}
                 onChange={(v) => setDraftProject({ ...draftProject, imageUrl: v })}
@@ -403,6 +418,14 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                 value={draftProject.description}
                 onChange={(v) =>
                   setDraftProject({ ...draftProject, description: v })
+                }
+              />
+              <CampoUploadAnexos
+                label="Regulamentos, Planilhas ou Documentos do Projeto"
+                disabled={isReadOnly}
+                attachments={draftProject.attachments || []}
+                onChange={(att) =>
+                  setDraftProject({ ...draftProject, attachments: att })
                 }
               />
             </div>
@@ -655,8 +678,9 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                   </select>
                 </div>
               </div>
-              <CampoTexto
-                label="Imagem de Capa (URL)"
+              <CampoUploadImagem
+                label="Imagem de Capa da Matéria"
+                disabled={isReadOnly}
                 value={draftNews.imageUrl}
                 onChange={(v) => setDraftNews({ ...draftNews, imageUrl: v })}
               />
@@ -685,6 +709,14 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                       .map((p) => p.trim())
                       .filter(Boolean),
                   })
+                }
+              />
+              <CampoUploadAnexos
+                label="Anexos e Editais da Matéria (PDF, Imagens, Planilhas)"
+                disabled={isReadOnly}
+                attachments={draftNews.attachments || []}
+                onChange={(att) =>
+                  setDraftNews({ ...draftNews, attachments: att })
                 }
               />
             </div>
@@ -935,6 +967,14 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                   setDraftEvent({ ...draftEvent, description: v })
                 }
               />
+              <CampoUploadAnexos
+                label="Regulamento, Cronograma ou Autorização do Evento (PDF/Doc)"
+                disabled={isReadOnly}
+                attachments={draftEvent.attachments || []}
+                onChange={(att) =>
+                  setDraftEvent({ ...draftEvent, attachments: att })
+                }
+              />
             </div>
           )}
         </PainelLateral>
@@ -1054,9 +1094,35 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
       },
     ];
 
+    const handleQuickBatchAlbumUpload = async (
+      e: React.ChangeEvent<HTMLInputElement>
+    ) => {
+      const fileList = e.target.files;
+      if (!fileList || fileList.length === 0 || isReadOnly) return;
+      const files: File[] = Array.from(fileList);
+      e.target.value = '';
+      const uploadedPhotos: { url: string; caption: string }[] = [];
+      for (const f of files) {
+        const dataUrl = await processImageUpload(f, 1100, 0.8);
+        const caption = f.name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ');
+        uploadedPhotos.push({ url: dataUrl, caption });
+      }
+      setDraftAlbum({
+        id: `alb-${Date.now()}`,
+        title: `Registro Fotográfico (${new Date().toLocaleDateString('pt-BR')})`,
+        category: 'Festivais Esportivos',
+        date: new Date().toLocaleDateString('pt-BR'),
+        location: 'Polo Rio Marinho · Cariacica/ES',
+        coverUrl: uploadedPhotos[0]?.url || '',
+        caption: `${uploadedPhotos.length} fotos enviadas em lote.`,
+        albumPhotos: uploadedPhotos,
+      });
+      setDrawerOpen(true);
+    };
+
     return (
       <div className="space-y-4">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-extrabold text-slate-900 dark:text-slate-100">
               Galeria de Fotos
@@ -1066,14 +1132,27 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
             </p>
           </div>
           {!isReadOnly && (
-            <button
-              type="button"
-              onClick={() => openEditAlbum()}
-              className="px-3 py-1.5 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Novo Álbum</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 cursor-pointer">
+                <Upload className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Criar Álbum via Upload de Fotos</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={handleQuickBatchAlbumUpload}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => openEditAlbum()}
+                className="px-3 py-1.5 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Novo Álbum</span>
+              </button>
+            </div>
           )}
         </div>
 
@@ -1118,17 +1197,29 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                 value={draftAlbum.location}
                 onChange={(v) => setDraftAlbum({ ...draftAlbum, location: v })}
               />
-              <CampoTexto
-                label="Imagem de Capa (URL)"
+              <CampoUploadImagem
+                label="Foto de Capa do Álbum"
+                disabled={isReadOnly}
                 value={draftAlbum.coverUrl}
                 onChange={(v) => setDraftAlbum({ ...draftAlbum, coverUrl: v })}
               />
               <CampoTexto
                 label="Legenda / Descrição"
                 multiline
-                rows={3}
+                rows={2}
                 value={draftAlbum.caption}
                 onChange={(v) => setDraftAlbum({ ...draftAlbum, caption: v })}
+              />
+              <CampoUploadMultiplasFotos
+                photos={draftAlbum.albumPhotos || []}
+                coverUrl={draftAlbum.coverUrl}
+                disabled={isReadOnly}
+                onChangePhotos={(nextPhotos) =>
+                  setDraftAlbum({ ...draftAlbum, albumPhotos: nextPhotos })
+                }
+                onSelectCover={(url) =>
+                  setDraftAlbum({ ...draftAlbum, coverUrl: url })
+                }
               />
             </div>
           )}
@@ -1334,8 +1425,9 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                   }
                 />
               </div>
-              <CampoTexto
-                label="Logo URL"
+              <CampoUploadImagem
+                label="Logomarca do Parceiro / Patrocinador"
+                disabled={isReadOnly}
                 value={draftSponsor.logoUrl}
                 onChange={(v) =>
                   setDraftSponsor({ ...draftSponsor, logoUrl: v })
@@ -1530,6 +1622,12 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                 value={draftPolo.address}
                 onChange={(v) => setDraftPolo({ ...draftPolo, address: v })}
               />
+              <CampoUploadImagem
+                label="Foto da Instalação / Polo"
+                disabled={isReadOnly}
+                value={draftPolo.imageUrl}
+                onChange={(v) => setDraftPolo({ ...draftPolo, imageUrl: v })}
+              />
               <CampoTexto
                 label="Descrição"
                 multiline
@@ -1683,9 +1781,118 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
       },
     ];
 
+    const handleBatchTransparencyDocsUpload = async (
+      e: React.ChangeEvent<HTMLInputElement>
+    ) => {
+      const fileList = e.target.files;
+      if (!fileList || fileList.length === 0 || isReadOnly) return;
+      const files: File[] = Array.from(fileList);
+      e.target.value = '';
+      const createdDocs: TransparencyDocument[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        try {
+          const attached = await processAttachmentUpload(f);
+          const cleanTitle = f.name
+            .replace(/\.[^/.]+$/, '')
+            .replace(/[_-]+/g, ' ');
+          createdDocs.push({
+            id: `doc-${Date.now()}-${i}`,
+            title: cleanTitle,
+            category: 'prestacao_contas',
+            date: new Date().toLocaleDateString('pt-BR'),
+            description: `Documento institucional (${attached.name} · ${attached.size}) enviado para transparência pública.`,
+            fileType: attached.type,
+            badge: 'Vigente / Regular',
+            fileName: attached.name,
+            fileSize: attached.size,
+            fileDataUrl: attached.dataUrl,
+            downloadUrl: attached.dataUrl,
+          });
+        } catch {
+          // Ignore oversized individual files
+        }
+      }
+      if (createdDocs.length === 0) return;
+      const next = [...createdDocs, ...transparencyDocs];
+      saveAdminChanges(
+        { transparencyDocs: next },
+        `${createdDocs.length} documento(s) publicados no Portal da Transparência!`
+      );
+      recordAuditEvent({
+        action: 'batch_upload_transparency_docs',
+        collection: 'transparency_docs',
+        itemId: `batch-${createdDocs.length}`,
+        afterSummary: `${createdDocs.length} arquivos enviados em lote`,
+        role,
+      });
+    };
+
+    const handleImportFinancialCsv = (
+      e: React.ChangeEvent<HTMLInputElement>
+    ) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file || isReadOnly) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const rawText = ev.target?.result as string;
+        if (!rawText) return;
+        const parsed = parseTransparencyFinancialCsv(rawText);
+        if (parsed.error) return;
+        const currentDash = siteSettings.transparencyDashboard || {
+          socioTorcedoresTotal: 140,
+          socioTorcedoresGoal: 200,
+          socioTorcedoresNewMonth: 12,
+          socioTorcedoresRetentionRate: '94%',
+          socioTorcedoresTiers: [],
+          socioTorcedoresMonthlyGrowth: [],
+          fiscalYear: String(new Date().getFullYear()),
+          totalRevenue: parsed.totalRevenue,
+          totalInvested: parsed.totalInvested,
+          directBeneficiaries: 320,
+          auditStatus: 'Regular / Aprovado pelo Conselho Fiscal',
+          lastAuditDate: new Date().toLocaleDateString('pt-BR'),
+          allocationBreakdown: [],
+          revenueSources: [],
+        };
+        const nextDashboard = {
+          ...currentDash,
+          totalRevenue: parsed.totalRevenue || currentDash.totalRevenue,
+          totalInvested: parsed.totalInvested || currentDash.totalInvested,
+          lastAuditDate: new Date().toLocaleDateString('pt-BR'),
+          allocationBreakdown:
+            parsed.allocationBreakdown.length > 0
+              ? parsed.allocationBreakdown
+              : currentDash.allocationBreakdown,
+          revenueSources:
+            parsed.revenueSources.length > 0
+              ? parsed.revenueSources
+              : currentDash.revenueSources,
+        };
+        saveAdminChanges(
+          {
+            siteSettings: {
+              ...siteSettings,
+              transparencyDashboard: nextDashboard,
+            },
+          },
+          `Gráficos financeiros do Portal da Transparência atualizados via planilha (${file.name})!`
+        );
+        recordAuditEvent({
+          action: 'import_financial_csv',
+          collection: 'site_settings',
+          itemId: file.name,
+          afterSummary: `Receita R$ ${parsed.totalRevenue} | Investido R$ ${parsed.totalInvested}`,
+          role,
+        });
+      };
+      reader.readAsText(file, 'UTF-8');
+    };
+
     return (
       <div className="space-y-4">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-extrabold text-slate-900 dark:text-slate-100">
               Portal da Transparência e Prestação de Contas
@@ -1693,18 +1900,55 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
             <p className="text-xs text-slate-500">
               {isReadOnly
                 ? 'Modo de leitura e conferência fiscal habilitado para seu perfil.'
-                : 'Gerencie certidões negativas, balancetes, estatuto e termos de fomento.'}
+                : 'Envie certidões (PDF), balancetes ou importe a planilha financeira para alimentar os gráficos.'}
             </p>
           </div>
           {!isReadOnly && (
-            <button
-              type="button"
-              onClick={() => openEditDoc()}
-              className="px-3 py-1.5 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Novo Documento</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  downloadCsvTemplate(
+                    'modelo-financeiro-transparencia.csv',
+                    TRANSPARENCY_FINANCE_SAMPLE_CSV
+                  )
+                }
+                className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                title="Baixar planilha modelo para os gráficos de Transparência"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-amber-600" />
+                <span>Modelo Financeiro CSV</span>
+              </button>
+              <label className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 cursor-pointer">
+                <Upload className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Importar Planilha Financeira (CSV)</span>
+                <input
+                  type="file"
+                  accept=".csv,.txt"
+                  className="hidden"
+                  onChange={handleImportFinancialCsv}
+                />
+              </label>
+              <label className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 cursor-pointer">
+                <Upload className="w-3.5 h-3.5 text-[#0284c7]" />
+                <span>Upload em Lote (PDFs/Docs)</span>
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,image/*"
+                  className="hidden"
+                  onChange={handleBatchTransparencyDocsUpload}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => openEditDoc()}
+                className="px-3 py-1.5 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Novo Documento</span>
+              </button>
+            </div>
           )}
         </div>
 
@@ -1726,6 +1970,29 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
         >
           {draftDoc && (
             <div className="space-y-4">
+              <CampoUploadDocumento
+                label="Upload de Arquivo Oficial (PDF, Planilha, Certidão ou Imagem)"
+                disabled={isReadOnly}
+                fileName={draftDoc.fileName}
+                fileSize={draftDoc.fileSize}
+                fileType={draftDoc.fileType}
+                downloadUrl={draftDoc.downloadUrl}
+                onFileProcessed={(meta) =>
+                  setDraftDoc({
+                    ...draftDoc,
+                    title: draftDoc.title.trim() || meta.suggestedTitle,
+                    fileName: meta.fileName,
+                    fileSize: meta.fileSize,
+                    fileType: meta.fileType,
+                    fileDataUrl: meta.dataUrl,
+                    downloadUrl: meta.dataUrl,
+                  })
+                }
+                onUrlChange={(url) =>
+                  setDraftDoc({ ...draftDoc, downloadUrl: url })
+                }
+              />
+
               <CampoTexto
                 label="Título do Documento"
                 required
@@ -1733,7 +2000,33 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                 value={draftDoc.title}
                 onChange={(v) => setDraftDoc({ ...draftDoc, title: v })}
               />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Categoria Oficial
+                  </label>
+                  <select
+                    disabled={isReadOnly}
+                    value={draftDoc.category}
+                    onChange={(e) =>
+                      setDraftDoc({
+                        ...draftDoc,
+                        category:
+                          e.target.value as TransparencyDocument['category'],
+                      })
+                    }
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                  >
+                    <option value="prestacao_contas">Prestação de Contas</option>
+                    <option value="certidoes">Certidões Negativas</option>
+                    <option value="fomento">Termos de Fomento</option>
+                    <option value="emendas">Emendas Parlamentares</option>
+                    <option value="estatuto">Estatuto & Atas</option>
+                    <option value="governanca">Governança & Diretoria</option>
+                    <option value="cnpj">Cartão CNPJ</option>
+                  </select>
+                </div>
                 <CampoTexto
                   label="Data de Publicação"
                   disabled={isReadOnly}
@@ -1747,12 +2040,7 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                   onChange={(v) => setDraftDoc({ ...draftDoc, badge: v })}
                 />
               </div>
-              <CampoTexto
-                label="URL para Download (PDF / Drive)"
-                disabled={isReadOnly}
-                value={draftDoc.downloadUrl || ''}
-                onChange={(v) => setDraftDoc({ ...draftDoc, downloadUrl: v })}
-              />
+
               <CampoTexto
                 label="Resumo Executivo"
                 multiline

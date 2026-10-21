@@ -82,7 +82,7 @@ service cloud.firestore {
         && nonEmptyStr(d.category, 100)
         && nonEmptyStr(d.summary, 2000)
         && d.content is list && d.content.size() <= 200
-        && optStr(d, 'imageUrl', 2000)
+        && optStr(d, 'imageUrl', 900000)
         && optStr(d, 'author', 120)
         && optStr(d, 'status', 40);
     }
@@ -93,7 +93,7 @@ service cloud.firestore {
         && nonEmptyStr(d.name, 200)
         && d.tier in ['master', 'ouro', 'prata', 'bronze', 'apoio']
         && nonEmptyStr(d.tierLabel, 100)
-        && nonEmptyStr(d.logoUrl, 2000)
+        && nonEmptyStr(d.logoUrl, 900000)
         && optStr(d, 'websiteUrl', 2000)
         && optStr(d, 'description', 2000)
         && nonEmptyStr(d.category, 100)
@@ -127,7 +127,7 @@ service cloud.firestore {
         && nonEmptyStr(d.location, 300)
         && nonEmptyStr(d.coordinator, 200)
         && nonEmptyStr(d.fundingSource, 300)
-        && optStr(d, 'imageUrl', 2000)
+        && optStr(d, 'imageUrl', 900000)
         && (!('participants' in d) || (d.participants is list && d.participants.size() <= 500));
     }
 
@@ -155,7 +155,7 @@ service cloud.firestore {
         && nonEmptyStr(d.category, 100)
         && nonEmptyStr(d.date, 80)
         && nonEmptyStr(d.location, 300)
-        && nonEmptyStr(d.coverUrl, 2000)
+        && nonEmptyStr(d.coverUrl, 900000)
         && optStr(d, 'caption', 1000)
         && d.albumPhotos is list && d.albumPhotos.size() <= 200;
     }
@@ -168,7 +168,9 @@ service cloud.firestore {
         && nonEmptyStr(d.date, 80)
         && nonEmptyStr(d.description, 4000)
         && nonEmptyStr(d.fileType, 80)
-        && nonEmptyStr(d.badge, 120);
+        && nonEmptyStr(d.badge, 120)
+        && optStr(d, 'downloadUrl', 900000)
+        && optStr(d, 'fileDataUrl', 900000);
     }
 
     function validFacilityPolo(docId) {
@@ -180,6 +182,7 @@ service cloud.firestore {
         && d.maxGuests is number && d.maxGuests > 0 && d.maxGuests <= 100000
         && nonEmptyStr(d.address, 300)
         && nonEmptyStr(d.description, 3000)
+        && optStr(d, 'imageUrl', 900000)
         && d.includedItems is list && d.includedItems.size() <= 100
         && d.rules is list && d.rules.size() <= 100;
     }

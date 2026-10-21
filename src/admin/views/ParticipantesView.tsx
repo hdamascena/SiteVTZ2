@@ -5,6 +5,7 @@ import {
   Upload,
   Edit3,
   Trash2,
+  FileSpreadsheet,
 } from 'lucide-react';
 import type { AdminUserProfile, ParticipantPrivateRecord } from '../types.ts';
 import {
@@ -16,6 +17,7 @@ import {
 import {
   CampoSensivelMascara,
   CampoTexto,
+  CampoUploadImagem,
   SeloSensivel,
 } from '../components/CampoTexto.tsx';
 import { Tabela, type ColunaTabela } from '../components/Tabela.tsx';
@@ -27,9 +29,11 @@ import { ConfirmarExclusao } from '../components/ConfirmarExclusao.tsx';
 import { useClubData } from '../../context/ClubDataContext.tsx';
 import type { ProjectParticipant } from '../../types/index.ts';
 import {
+  NEXTFIT_SAMPLE_CSV_CONTENT,
   parseNextFitCsv,
   mergeNextFitRowsIntoProjects,
 } from '../../utils/nextfitCsv.ts';
+import { downloadCsvTemplate } from '../../utils/fileUpload.ts';
 
 interface ParticipantesViewProps {
   profile: AdminUserProfile;
@@ -440,7 +444,7 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
       return;
     }
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       const rawText = ev.target?.result as string;
       if (!rawText) return;
       const targetProj =
@@ -456,9 +460,34 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
           parsed.rows,
           targetProj || 'auto'
         );
+
+      for (const row of parsed.rows) {
+        const pid = row.targetProjectId || targetProj || allowedProjects[0]?.id || '';
+        if (!pid) continue;
+        await saveParticipantPrivate({
+          id: row.id,
+          projectId: pid,
+          participantName: row.name,
+          birthDate: row.birthDate,
+          height: row.height,
+          weight: row.weight,
+          bmi: row.bmi,
+          nextfitCode: row.nextfitCode,
+          planName: row.planName,
+          schoolInfo: {
+            schoolName: row.schoolName,
+            grade: 'Regular',
+            turn: 'Matutino',
+            attendanceRate: '98%',
+          },
+          healthNotes: row.notes,
+          updatedAt: new Date().toISOString(),
+        }).catch(() => {});
+      }
+
       saveAdminChanges({
         projects: updatedProjects,
-        toastMessage: `CSV importado: ${addedCount} novos e ${updatedCount} atualizados!`,
+        toastMessage: `Planilha importada: ${addedCount} novos e ${updatedCount} atualizados!`,
         logDetails: `Importação CSV NextFit (${file.name}): +${addedCount} / ~${updatedCount}.`,
       });
       recordAuditEvent({
@@ -615,20 +644,36 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
         headerActions={
           <>
             {canImportCsv(profile.role) && (
-              <label className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-lg cursor-pointer inline-flex items-center gap-1.5">
-                <Upload className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Importar CSV</span>
-                <input
-                  type="file"
-                  accept=".csv,.txt"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleImportCsvFile(f);
-                    e.target.value = '';
-                  }}
-                />
-              </label>
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadCsvTemplate(
+                      'modelo-participantes-vitalizar.csv',
+                      NEXTFIT_SAMPLE_CSV_CONTENT
+                    )
+                  }
+                  className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-lg cursor-pointer inline-flex items-center gap-1.5"
+                  title="Baixar planilha modelo para preenchimento no Excel"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Modelo CSV</span>
+                </button>
+                <label className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-lg cursor-pointer inline-flex items-center gap-1.5">
+                  <Upload className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Importar Planilha CSV</span>
+                  <input
+                    type="file"
+                    accept=".csv,.txt"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleImportCsvFile(f);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+              </>
             )}
 
             {canExportSensitiveCsv(profile.role) && (
@@ -719,8 +764,8 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
             />
           </div>
 
-          <CampoTexto
-            label="URL da Foto"
+          <CampoUploadImagem
+            label="Foto do Aluno / Atleta"
             value={formPhotoUrl}
             onChange={setFormPhotoUrl}
             classification="público"

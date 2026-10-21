@@ -184,3 +184,192 @@ export function parseEventIsoDate(isoDate: string): {
     formattedDate: `${parseInt(day, 10)} de ${MONTHS_FULL_PT[monthIdx]} de ${year}`,
   };
 }
+
+export const TRANSPARENCY_FINANCE_SAMPLE_CSV = [
+  'Tipo;Categoria / Destinacao;Percentual (%);Valor (R$);Descricao',
+  'Destinacao;Material Esportivo e Uniformes;42;126000;Bolas oficiais, coletes, redes e kits de treino para os polos',
+  'Destinacao;Equipe Tecnica e Professores;33;99000;Remuneracao de coordenadores, professores de educacao fisica e monitores',
+  'Destinacao;Manutencao de Polos e Logistica;15;45000;Transporte para festivais, lanches e conservacao das quadras',
+  'Destinacao;Gestao Administrativa e Contabil;10;30000;Contabilidade, certidoes, seguros e manutencao institucional',
+  'Receita;Termos de Fomento e Emendas Publicas;55;165000;Repasses oficiais vinculados a projetos esportivos aprovados',
+  'Receita;Empresas Parceiras e Patrocinios;30;90000;Apoio privado direto e cotas de patrocinio social',
+  'Receita;Doacoes PIX e Comunidade;15;45000;Contribuicoes espontaneas de apoiadores e campanhas solidarias',
+].join('\r\n');
+
+export interface ParsedTransparencyFinanceCsv {
+  allocationBreakdown: {
+    label: string;
+    percentage: number;
+    amount: number;
+    description: string;
+  }[];
+  revenueSources: {
+    label: string;
+    percentage: number;
+    amount: number;
+  }[];
+  totalRevenue: number;
+  totalInvested: number;
+  error?: string;
+}
+
+/**
+ * Parses a semicolon or comma separated CSV containing financial allocation ("Destinacao"/"Despesa")
+ * and revenue sources ("Receita"/"Origem") to feed the Transparency charts.
+ */
+export function parseTransparencyFinancialCsv(
+  rawText: string
+): ParsedTransparencyFinanceCsv {
+  const lines = rawText
+    .replace(/^\uFEFF/, '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length < 2) {
+    return {
+      allocationBreakdown: [],
+      revenueSources: [],
+      totalRevenue: 0,
+      totalInvested: 0,
+      error: 'A planilha financeira precisa ter cabeçalho e pelo menos 1 linha de dados.',
+    };
+  }
+
+  const delimiter = lines[0].includes(';') ? ';' : ',';
+  const allocationBreakdown: ParsedTransparencyFinanceCsv['allocationBreakdown'] = [];
+  const revenueSources: ParsedTransparencyFinanceCsv['revenueSources'] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(delimiter).map((c) => c.replace(/^"|"$/g, '').trim());
+    if (cols.length < 4) continue;
+    const [rawType, label, rawPct, rawAmount, description = ''] = cols;
+    if (!label) continue;
+
+    const pct = Number(rawPct.replace('%', '').replace(',', '.')) || 0;
+    const amount =
+      Number(
+        rawAmount
+          .replace(/[R$\s]/g, '')
+          .replace(/\.(?=\d{3})/g, '')
+          .replace(',', '.')
+      ) || 0;
+
+    const normType = rawType
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+
+    if (normType.includes('receita') || normType.includes('origem') || normType.includes('entrada')) {
+      revenueSources.push({
+        label,
+        percentage: pct,
+        amount,
+      });
+    } else {
+      allocationBreakdown.push({
+        label,
+        percentage: pct,
+        amount,
+        description: description || 'Aplicação direta nas atividades estatutárias.',
+      });
+    }
+  }
+
+  if (allocationBreakdown.length === 0 && revenueSources.length === 0) {
+    return {
+      allocationBreakdown: [],
+      revenueSources: [],
+      totalRevenue: 0,
+      totalInvested: 0,
+      error: 'Nenhuma linha financeira válida foi identificada no arquivo.',
+    };
+  }
+
+  const totalInvested = allocationBreakdown.reduce((acc, item) => acc + item.amount, 0);
+  const totalRevenue =
+    revenueSources.reduce((acc, item) => acc + item.amount, 0) || totalInvested;
+
+  return {
+    allocationBreakdown,
+    revenueSources,
+    totalRevenue,
+    totalInvested,
+  };
+}
+
+export const ENROLLMENT_SAMPLE_CSV = [
+  'Nome do Aluno;Idade;Responsavel Legal;Telefone / WhatsApp;E-mail;Turma / Turno',
+  'Gabriel Souza Lima;11;Maria Souza Lima;(27) 99811-2233;maria.lima@email.com;Manhã (08h00 às 10h30)',
+  'Helena Costa Alves;14;Carlos Eduardo Alves;(27) 99744-5566;carlos.alves@email.com;Tarde (14h00 às 16h30)',
+  'Arthur Mendes Rocha;9;Juliana Mendes;(27) 99622-8899;juliana.mendes@email.com;Manhã (08h00 às 10h30)',
+].join('\r\n');
+
+export interface ParsedEnrollmentCsvRow {
+  studentName: string;
+  studentAge: number;
+  responsibleName: string;
+  phone: string;
+  email: string;
+  modalityOrClass: string;
+}
+
+export function parseEnrollmentsCsv(rawText: string): {
+  rows: ParsedEnrollmentCsvRow[];
+  error?: string;
+} {
+  const lines = rawText
+    .replace(/^\uFEFF/, '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length < 2) {
+    return {
+      rows: [],
+      error: 'O arquivo CSV precisa conter o cabeçalho e pelo menos uma inscrição.',
+    };
+  }
+
+  const delimiter = lines[0].includes(';') ? ';' : ',';
+  const rows: ParsedEnrollmentCsvRow[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(delimiter).map((c) => c.replace(/^"|"$/g, '').trim());
+    const studentName = cols[0] || '';
+    if (!studentName) continue;
+    const studentAge = Number(cols[1]) || 12;
+    const responsibleName = cols[2] || '';
+    const phone = cols[3] || '(27) 99999-0000';
+    const email = cols[4] || '';
+    const modalityOrClass = cols[5] || 'Manhã (08h00 às 10h30)';
+    rows.push({
+      studentName,
+      studentAge,
+      responsibleName,
+      phone,
+      email,
+      modalityOrClass,
+    });
+  }
+
+  if (rows.length === 0) {
+    return { rows: [], error: 'Nenhum aluno válido encontrado na planilha.' };
+  }
+
+  return { rows };
+}
+
+/**
+ * Triggers a browser download of a UTF-8 CSV template with BOM for Excel compatibility
+ */
+export function downloadCsvTemplate(filename: string, content: string): void {
+  const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+

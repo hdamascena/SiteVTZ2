@@ -6,13 +6,15 @@ import {
   XCircle,
   Plus,
   Users,
+  Upload,
+  FileSpreadsheet,
 } from 'lucide-react';
 import type {
   AdminUserProfile,
   ParticipantPrivateRecord,
   ProjectEnrollmentStatus,
 } from '../types.ts';
-import { resolveProjectIdFromRsvp } from '../permissions.ts';
+import { canImportCsv, resolveProjectIdFromRsvp } from '../permissions.ts';
 import {
   CampoSensivelMascara,
   CampoTexto,
@@ -28,6 +30,11 @@ import {
   type EventRsvpRecord,
 } from '../../context/ClubDataContext.tsx';
 import type { ProjectParticipant } from '../../types/index.ts';
+import {
+  ENROLLMENT_SAMPLE_CSV,
+  parseEnrollmentsCsv,
+  downloadCsvTemplate,
+} from '../../utils/fileUpload.ts';
 
 interface InscricoesProjetosViewProps {
   profile: AdminUserProfile;
@@ -291,6 +298,55 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
     }, 300);
   };
 
+  const handleImportEnrollmentsCsv = (file: File) => {
+    if (!canImportCsv(profile.role)) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const rawText = ev.target?.result as string;
+      if (!rawText) return;
+      const parsed = parseEnrollmentsCsv(rawText);
+      if (parsed.error) {
+        showToast(parsed.error, 'error');
+        return;
+      }
+      const targetProj =
+        projects.find((p) => p.id === projectFilter) || allowedProjects[0];
+      if (!targetProj) return;
+
+      const newRecords: EventRsvpRecord[] = parsed.rows.map((row, idx) => ({
+        id: `rsvp-${Date.now()}-${idx}`,
+        eventId: `inscricao-${targetProj.id}`,
+        eventTitle: `Inscrição no Projeto: ${targetProj.name}`,
+        name: `${row.studentName} (${row.studentAge} anos · ${row.modalityOrClass})`,
+        phone: row.phone,
+        email: row.email || undefined,
+        spots: 1,
+        date: new Date().toLocaleDateString('pt-BR'),
+        confirmationCode: `VIT-${Math.floor(1000 + Math.random() * 9000)}`,
+        projectId: targetProj.id,
+        enrollmentStatus: 'pendente',
+        studentName: row.studentName,
+        studentAge: row.studentAge,
+        responsibleName: row.responsibleName || undefined,
+        modalityOrClass: row.modalityOrClass,
+      }));
+
+      saveAdminChanges({
+        rsvps: [...newRecords, ...rsvps],
+        toastMessage: `${newRecords.length} inscrições importadas via planilha para ${targetProj.name}!`,
+        logDetails: `Importação em lote de ${newRecords.length} inscrições via arquivo ${file.name}.`,
+      });
+      recordAuditEvent({
+        action: 'IMPORTAR_INSCRICOES_CSV',
+        collection: 'rsvps',
+        itemId: file.name,
+        role: profile.role,
+        afterSummary: `${newRecords.length} inscrições adicionadas em ${targetProj.name}`,
+      });
+    };
+    reader.readAsText(file, 'UTF-8');
+  };
+
   const columns: ColunaTabela<EventRsvpRecord>[] = [
     {
       id: 'aluno',
@@ -505,14 +561,47 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
           </div>
         }
         headerActions={
-          <button
-            type="button"
-            onClick={() => setDrawerOpen(true)}
-            className="px-3.5 py-2 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1.5"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Nova Inscrição em Projeto</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {canImportCsv(profile.role) && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadCsvTemplate(
+                      'modelo-inscricoes-vitalizar.csv',
+                      ENROLLMENT_SAMPLE_CSV
+                    )
+                  }
+                  className="px-2.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-lg cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Modelo CSV</span>
+                </button>
+                <label className="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-lg cursor-pointer inline-flex items-center gap-1.5">
+                  <Upload className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Importar Inscrições (CSV)</span>
+                  <input
+                    type="file"
+                    accept=".csv,.txt"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleImportEnrollmentsCsv(f);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              className="px-3.5 py-2 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Nova Inscrição em Projeto</span>
+            </button>
+          </div>
         }
         emptyTitle="Nenhuma inscrição encontrada"
         emptyDescription="Use o botão 'Nova Inscrição em Projeto' para registrar uma solicitação de vaga."
