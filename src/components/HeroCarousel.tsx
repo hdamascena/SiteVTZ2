@@ -73,6 +73,8 @@ export const HeroCarousel: React.FC<HeroCarouselProps> = ({
   const [activeSlide, setActiveSlide] = useState(0);
 
   useEffect(() => {
+    // Users who ask for reduced motion change slides only with the arrows/dots
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const timer = setInterval(() => {
       setActiveSlide((prev) => (prev + 1) % slides.length);
     }, 7000);

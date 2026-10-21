@@ -1575,12 +1575,16 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     >
       {children}
 
-      {/* Floating Global Toasts for Instant UX Feedback */}
-      {toasts.length > 0 && (
-        <div className="fixed bottom-5 right-5 z-[100] flex flex-col gap-2 max-w-sm pointer-events-none">
+      {/* Floating Global Toasts: the live region stays mounted so screen readers announce each new toast */}
+      <div
+        className="fixed bottom-5 right-5 z-[100] flex flex-col gap-2 max-w-sm pointer-events-none"
+        aria-live="polite"
+        aria-atomic="false"
+      >
           {toasts.map((toast) => (
             <div
               key={toast.id}
+              role={toast.type === 'error' ? 'alert' : 'status'}
               className={`pointer-events-auto p-4 rounded-xl shadow-2xl text-xs font-semibold flex items-center justify-between gap-3 text-white border transition-all animate-in slide-in-from-bottom-3 duration-200 ${
                 toast.type === 'error'
                   ? 'bg-rose-600 border-rose-700'
@@ -1591,16 +1595,16 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             >
               <span>{toast.message}</span>
               <button
+                type="button"
                 onClick={() => removeToast(toast.id)}
                 className="p-1 hover:bg-white/20 rounded-md transition-colors cursor-pointer"
                 aria-label="Fechar notificação"
               >
-                ✕
+                <span aria-hidden="true">✕</span>
               </button>
             </div>
           ))}
-        </div>
-      )}
+      </div>
     </ClubDataContext.Provider>
   );
 };

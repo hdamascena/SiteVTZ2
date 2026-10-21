@@ -58,7 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
           : 'bg-[#061a38] border-b border-sky-900/50'
       }`}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-4">
         {/* Zone 1: Brand Lockup with New 3D Metallic Crest */}
         <button
           type="button"
@@ -76,9 +76,9 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </button>
 
-        {/* Zone 2: Single-Line Navigation Links */}
+        {/* Zone 2: Single-Line Navigation Links (9 links + utilities only fit from xl up; below that the drawer is used) */}
         <nav
-          className="hidden lg:flex items-center gap-5 xl:gap-6"
+          className="hidden xl:flex items-center gap-4 2xl:gap-6"
           aria-label="Navegação principal"
         >
           {NAV_LINKS.map((link) => {
@@ -118,9 +118,10 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={onOpenAdmin}
               className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-sky-200 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
               title="Painel Administrativo"
+              aria-label="Painel Administrativo"
             >
-              <Lock className="w-3.5 h-3.5 text-sky-400" />
-              <span>Admin</span>
+              <Lock className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
+              <span className="hidden 2xl:inline">Admin</span>
             </button>
           )}
 
@@ -137,7 +138,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="lg:hidden p-2.5 text-sky-100 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
+            className="xl:hidden p-2.5 text-sky-100 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
             aria-label={mobileMenuOpen ? 'Fechar menu' : 'Abrir menu de navegação'}
             aria-expanded={mobileMenuOpen}
           >
@@ -148,7 +149,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Mobile Navigation Drawer */}
       {mobileMenuOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex justify-end">
+        <div className="xl:hidden fixed inset-0 z-50 flex justify-end">
           <div
             className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
             onClick={() => setMobileMenuOpen(false)}

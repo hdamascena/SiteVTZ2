@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
+import { motion, MotionConfig } from 'motion/react';
 import { ClubDataProvider, useClubData } from './context/ClubDataContext.tsx';
 import { Header } from './components/Header.tsx';
 import { HeroCarousel } from './components/HeroCarousel.tsx';
@@ -307,8 +307,10 @@ function VitalizarMainApp() {
 
 export default function App() {
   return (
-    <ClubDataProvider>
-      <VitalizarMainApp />
-    </ClubDataProvider>
+    <MotionConfig reducedMotion="user">
+      <ClubDataProvider>
+        <VitalizarMainApp />
+      </ClubDataProvider>
+    </MotionConfig>
   );
 }
