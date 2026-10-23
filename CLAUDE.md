@@ -15,7 +15,10 @@
      `ai-studio-remixassociaoesp-12c540e5-8cfd-44ca-b9ab-b7861fb109db` (no projeto GCP `ceremonial-amulet-314dk`).
    - Sempre importe `db` e `auth` de `src/firebase.ts`. Nunca chame `getFirestore(app)` sem passar `firebaseConfig.firestoreDatabaseId`.
 2. **Coleções Firestore e Sincronização (`src/context/ClubDataContext.tsx`)**:
-   - Coleções ativas: `club_info`, `site_settings`, `projects`, `news_articles`, `events`, `gallery_albums`, `sponsors`, `facility_polos`, `transparency_docs`, `rsvps`, `volunteers`, `contact_messages`, `admin_logs`, `audit_trail`, `users`.
+   - Coleções ativas (as mesmas de `firestore.rules`):
+     - Públicas: `club_info`, `site_settings`, `projects`, `news_articles`, `events`, `gallery_albums`, `sponsors`, `facility_polos`, `transparency_docs`.
+     - Envios de visitantes: `rsvps`, `contact_messages`, `scout_inquiries`, `donation_pledges`, `volunteer_applications`.
+     - Administração: `admins`, `admin_invites`, `audit_logs`.
    - Para persistir alterações administrativas no Firestore, utilize `saveAdminChanges(...)` do `useClubData()`.
    - Se criar ou alterar campos nas coleções, atualize também `firebase-blueprint.json` e `firestore.rules` (o deploy das regras `firestore.rules` deve ser feito pelo painel online ou via Firebase CLI apontando para o database ID correto).
 
