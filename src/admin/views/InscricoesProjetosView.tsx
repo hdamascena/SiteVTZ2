@@ -7,6 +7,8 @@ import {
   Users,
   Upload,
   FileSpreadsheet,
+  Trash2,
+  Calendar,
 } from 'lucide-react';
 import type {
   AdminUserProfile,
@@ -14,6 +16,7 @@ import type {
 } from '../types.ts';
 import {
   canImportCsv,
+  canDeleteRecords,
   resolveProjectIdFromRsvp,
   sanitizeShowcaseParticipant,
 } from '../permissions.ts';
@@ -33,6 +36,8 @@ import {
 } from '../../context/ClubDataContext.tsx';
 import {
   syncProjectSpotsAndTeams,
+  normalizeParticipantPositionForModality,
+  derivePositionGroup,
   type ProjectParticipant,
 } from '../../types/index.ts';
 import {
@@ -60,6 +65,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
 }) => {
   const {
     projects,
+    events,
     rsvps,
     addRsvp,
     saveAdminChanges,
@@ -92,7 +98,19 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
   const visibleEnrollments = useMemo(() => {
     return rsvps.filter((r) => {
       const pid = resolveProjectIdFromRsvp(r, projects);
-      if (projectFilter !== 'all' && pid !== projectFilter) return false;
+      const isEventRsvp = !pid && events.some((ev) => ev.id === r.eventId);
+      if (projectFilter === 'apenas_projetos' && !pid) return false;
+      if (projectFilter === 'apenas_eventos' && !isEventRsvp) return false;
+      if (projectFilter.startsWith('evt:')) {
+        if (r.eventId !== projectFilter.slice(4)) return false;
+      } else if (
+        projectFilter !== 'all' &&
+        projectFilter !== 'apenas_projetos' &&
+        projectFilter !== 'apenas_eventos' &&
+        pid !== projectFilter
+      ) {
+        return false;
+      }
       const st = r.enrollmentStatus || 'pendente';
       if (statusFilter !== 'all' && st !== statusFilter) return false;
       const q = searchQuery.trim().toLowerCase();
@@ -104,7 +122,23 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
         (r.modalityOrClass || '').toLowerCase().includes(q)
       );
     });
-  }, [rsvps, projects, projectFilter, statusFilter, searchQuery]);
+  }, [rsvps, projects, events, projectFilter, statusFilter, searchQuery]);
+
+  const handleDeleteRsvp = (rsvp: EventRsvpRecord) => {
+    const nextRsvps = rsvps.filter((item) => item.id !== rsvp.id);
+    saveAdminChanges({
+      rsvps: nextRsvps,
+      toastMessage: `Inscrição de "${rsvp.studentName || rsvp.name}" removida e vaga liberada.`,
+      logDetails: `Inscrição ${rsvp.confirmationCode} excluída.`,
+    });
+    recordAuditEvent({
+      action: 'EXCLUIR_INSCRICAO_RSVP',
+      collection: 'rsvps',
+      itemId: rsvp.id,
+      role: profile.role,
+      beforeSummary: rsvp.studentName || rsvp.name,
+    });
+  };
 
   const handleUpdateStatus = (
     rsvp: EventRsvpRecord,
@@ -159,21 +193,26 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
         : '14 a 15 anos');
 
     const newParticipantId = `part-${Date.now()}`;
+    const resolvedModality = matchedTeam?.modality || rsvp.modality || 'Voleibol';
+    const resolvedPosition = normalizeParticipantPositionForModality(
+      'Atleta',
+      resolvedModality
+    );
     const newParticipant: ProjectParticipant = sanitizeShowcaseParticipant({
       id: newParticipantId,
       name: cleanName,
       nickname: cleanName.split(' ')[0],
       enrollmentStatus: 'ativo',
       teamId: matchedTeam?.id,
-      modality: matchedTeam?.modality || rsvp.modality,
+      modality: resolvedModality,
       modalityOrClass: matchedTeam
         ? `${matchedTeam.name} (${matchedTeam.modality} · ${matchedTeam.polo})`
         : rsvp.modalityOrClass || targetProject.name,
       photoUrl:
         'https://images.unsplash.com/photo-1517466787929-bc90951d0974?w=400&q=80',
       jerseyNumber: ((targetProject.participants?.length || 0) % 99) + 1,
-      position: 'Atleta',
-      positionGroup: 'meio',
+      position: resolvedPosition,
+      positionGroup: derivePositionGroup(resolvedPosition, resolvedModality),
       preferredFoot: 'Destro',
       age,
       birthDate: '',
@@ -350,20 +389,23 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
     },
     {
       id: 'projeto',
-      header: 'Projeto / Time & Modalidade',
+      header: 'Vínculo (Projeto / Time ou Evento)',
       render: (r) => {
         const pid = resolveProjectIdFromRsvp(r, projects);
         const proj = projects.find((p) => p.id === pid);
         const linkedTeam = proj?.teams?.find((t) => t.id === r.teamId);
+        const linkedEvent = !proj ? events.find((ev) => ev.id === r.eventId) : null;
         return (
           <div>
             <span className="font-semibold text-slate-800 dark:text-slate-200 block">
-              {proj ? proj.name : r.eventTitle}
+              {proj ? proj.name : linkedEvent ? linkedEvent.title : r.eventTitle}
             </span>
             <span className="text-[11px] text-[#0284c7] dark:text-sky-400 font-medium">
               {linkedTeam
                 ? `${linkedTeam.name} (${linkedTeam.modality} · ${linkedTeam.polo})`
-                : r.modalityOrClass || 'Time Oficial'}
+                : linkedEvent
+                ? `Agenda de Eventos (${r.spots || 1} vaga${(r.spots || 1) > 1 ? 's' : ''} · ${linkedEvent.date})`
+                : r.modalityOrClass || 'Inscrição Geral'}
             </span>
           </div>
         );
@@ -429,9 +471,11 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
       align: 'right',
       render: (r) => {
         const st = r.enrollmentStatus || 'pendente';
+        const pid = resolveProjectIdFromRsvp(r, projects);
+        const isEventOnly = !pid && events.some((ev) => ev.id === r.eventId);
         return (
           <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
-            {st !== 'aprovada' && (
+            {!isEventOnly && st !== 'aprovada' && (
               <button
                 type="button"
                 onClick={() => handleApproveAndEnrollInProject(r)}
@@ -458,10 +502,20 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
                 type="button"
                 onClick={() => handleUpdateStatus(r, 'recusada')}
                 className="px-2 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-rose-100 text-rose-600 text-[11px] font-semibold rounded-lg cursor-pointer"
-                title="Recusar inscrição"
+                title="Recusar inscrição e liberar vaga"
               >
                 <XCircle className="w-3 h-3 inline mr-1" />
                 Recusar
+              </button>
+            )}
+            {canDeleteRecords(profile.role) && (
+              <button
+                type="button"
+                onClick={() => handleDeleteRsvp(r)}
+                className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer"
+                title="Excluir registro de inscrição e liberar vaga"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
@@ -515,10 +569,17 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
               onChange={(e) => setProjectFilter(e.target.value)}
               className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
             >
-              <option value="all">Todos os Projetos</option>
+              <option value="all">Todos (Projetos & Eventos)</option>
+              <option value="apenas_projetos">Apenas Projetos & Times</option>
+              <option value="apenas_eventos">Apenas Agenda de Eventos</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name}
+                  Projeto: {p.name}
+                </option>
+              ))}
+              {events.map((ev) => (
+                <option key={ev.id} value={`evt:${ev.id}`}>
+                  Evento: {ev.title}
                 </option>
               ))}
             </select>

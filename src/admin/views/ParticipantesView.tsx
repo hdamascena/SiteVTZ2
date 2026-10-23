@@ -27,6 +27,9 @@ import { ConfirmarExclusao } from '../components/ConfirmarExclusao.tsx';
 import { useClubData } from '../../context/ClubDataContext.tsx';
 import {
   syncProjectSpotsAndTeams,
+  getParticipantModalityProfile,
+  normalizeParticipantPositionForModality,
+  derivePositionGroup,
   type ProjectParticipant,
 } from '../../types/index.ts';
 import {
@@ -125,12 +128,17 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     setEditingRow(row);
     const p = row.participant;
     const proj = projects.find((pr) => pr.id === row.projectId) || projects[0];
+    const team =
+      proj?.teams?.find((t) => t.id === p.teamId) || proj?.teams?.[0];
+    const resolvedMod = team?.modality || p.modality || 'Voleibol';
     setFormProjectId(row.projectId);
-    setFormTeamId(p.teamId || proj?.teams?.[0]?.id || '');
+    setFormTeamId(team?.id || p.teamId || '');
     setFormName(p.name);
     setFormNickname(p.nickname || '');
-    setFormCategory(p.category || '12 a 13 anos');
-    setFormPosition(p.position || 'Ponteira');
+    setFormCategory(p.category || team?.category || '12 a 13 anos');
+    setFormPosition(
+      normalizeParticipantPositionForModality(p.position, resolvedMod)
+    );
     setFormJersey(String(p.jerseyNumber || 10));
     setFormAge(String(p.age || 12));
     setFormCardTier(p.cardTier || 'prata');
@@ -147,6 +155,7 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
         : projects[0]?.id || '';
     const defaultProj = projects.find((p) => p.id === defaultProjId) || projects[0];
     const firstTeam = defaultProj?.teams?.[0];
+    const resolvedMod = firstTeam?.modality || 'Voleibol';
     setIsNew(true);
     setEditingRow({
       projectId: defaultProjId,
@@ -158,7 +167,9 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     setFormName('');
     setFormNickname('');
     setFormCategory(firstTeam?.category || '12 a 13 anos');
-    setFormPosition('Ponteira');
+    setFormPosition(
+      normalizeParticipantPositionForModality('', resolvedMod)
+    );
     setFormJersey('10');
     setFormAge('12');
     setFormCardTier('prata');
@@ -178,6 +189,12 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     const partId = isNew ? `part-${Date.now()}` : editingRow.participant.id;
     const ovr = Math.min(99, Math.max(50, Number(formOverall) || 78));
     const targetTeam = selectedFormProject?.teams?.find((t) => t.id === formTeamId);
+    const resolvedModality =
+      targetTeam?.modality || editingRow.participant.modality || 'Voleibol';
+    const resolvedPosition = normalizeParticipantPositionForModality(
+      formPosition.trim(),
+      resolvedModality
+    );
     const modalityOrClassLabel = targetTeam
       ? `${targetTeam.name} (${targetTeam.modality} · ${targetTeam.polo})`
       : editingRow.participant.modalityOrClass || selectedFormProject?.name;
@@ -190,14 +207,14 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
             nickname: formNickname.trim() || formName.trim().split(' ')[0],
             enrollmentStatus: 'ativo',
             teamId: targetTeam?.id || formTeamId || undefined,
-            modality: targetTeam?.modality,
+            modality: resolvedModality,
             modalityOrClass: modalityOrClassLabel,
             photoUrl:
               formPhotoUrl.trim() ||
               'https://images.unsplash.com/photo-1517466787929-bc90951d0974?w=400&q=80',
             jerseyNumber: Number(formJersey) || 10,
-            position: formPosition.trim() || 'Atleta',
-            positionGroup: 'meio',
+            position: resolvedPosition,
+            positionGroup: derivePositionGroup(resolvedPosition, resolvedModality),
             preferredFoot: 'Destro',
             age: Number(formAge) || 12,
             birthDate: '',
@@ -237,11 +254,12 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
             name: formName.trim(),
             nickname: formNickname.trim() || formName.trim().split(' ')[0],
             teamId: targetTeam?.id || formTeamId || editingRow.participant.teamId,
-            modality: targetTeam?.modality || editingRow.participant.modality,
+            modality: resolvedModality,
             modalityOrClass: modalityOrClassLabel,
             photoUrl: formPhotoUrl.trim() || editingRow.participant.photoUrl,
             jerseyNumber: Number(formJersey) || 10,
-            position: formPosition.trim(),
+            position: resolvedPosition,
+            positionGroup: derivePositionGroup(resolvedPosition, resolvedModality),
             age: Number(formAge) || editingRow.participant.age,
             category: formCategory.trim(),
             cardTier: formCardTier,
@@ -672,7 +690,12 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
                   const tid = e.target.value;
                   setFormTeamId(tid);
                   const tm = selectedFormProject?.teams?.find((t) => t.id === tid);
-                  if (tm) setFormCategory(tm.category);
+                  if (tm) {
+                    setFormCategory(tm.category);
+                    setFormPosition((prev) =>
+                      normalizeParticipantPositionForModality(prev, tm.modality)
+                    );
+                  }
                 }}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
               >
@@ -708,12 +731,24 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
               onChange={setFormCategory}
               classification="público"
             />
-            <CampoTexto
-              label="Posição"
-              value={formPosition}
-              onChange={setFormPosition}
-              classification="público"
-            />
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
+                Posição ({selectedFormProject?.teams?.find((t) => t.id === formTeamId)?.modality || 'Modalidade'})
+              </label>
+              <select
+                value={formPosition}
+                onChange={(e) => setFormPosition(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+              >
+                {getParticipantModalityProfile(
+                  selectedFormProject?.teams?.find((t) => t.id === formTeamId)?.modality
+                ).positions.map((posOpt) => (
+                  <option key={posOpt} value={posOpt}>
+                    {posOpt}
+                  </option>
+                ))}
+              </select>
+            </div>
             <CampoTexto
               label="Nº Camisa"
               type="number"

@@ -17,13 +17,20 @@ import {
   purgeObsoleteCollections,
   insertCollectionRecordIfNew,
   takeEventSpots,
+  attachLiveEventSpots,
 } from './src/db/users.ts';
 import {
   getReadablePrivateCollections,
   canRoleWriteCollection,
   canRoleDeleteFromCollection,
   filterPrivateCollectionsForUser,
+  sanitizeShowcaseParticipant,
 } from './src/admin/permissions.ts';
+import {
+  syncProjectSpotsAndTeams,
+  type VitalizarProject,
+  type ProjectParticipant,
+} from './src/types/index.ts';
 
 const PUBLIC_COLLECTION_NAMES = [
   'club_info',
@@ -104,6 +111,7 @@ async function startServer() {
   app.get('/api/bootstrap', async (_req, res) => {
     try {
       const collections = await getCollectionsByNames(PUBLIC_COLLECTION_NAMES);
+      await attachLiveEventSpots(collections);
       res.json({ collections });
     } catch (error: any) {
       console.error('Failed to fetch bootstrap collections:', error);
@@ -169,6 +177,41 @@ async function startServer() {
     } catch (error: any) {
       console.error(`Failed to record submission in ${collectionName}:`, error);
       res.status(500).json({ error: error.message || 'Failed to save submission' });
+    }
+  });
+
+  app.post('/api/participants/profile', async (req, res) => {
+    const { projectId, participant } = req.body || {};
+    if (!projectId || !participant || typeof participant !== 'object' || !participant.id) {
+      return res.status(400).json({ error: 'projectId and participant with id are required' });
+    }
+    try {
+      const existingRecord = await getCollectionItemById('projects', String(projectId));
+      if (!existingRecord?.payload) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+      const proj = existingRecord.payload as VitalizarProject;
+      const currentParticipants = Array.isArray(proj.participants) ? proj.participants : [];
+      const idx = currentParticipants.findIndex((pt) => pt.id === participant.id);
+      if (idx === -1) {
+        return res.status(404).json({ error: 'Participant not found in project' });
+      }
+      const sanitizedPart = sanitizeShowcaseParticipant({
+        ...currentParticipants[idx],
+        ...(participant as ProjectParticipant),
+        id: currentParticipants[idx].id,
+      });
+      const nextParticipants = [...currentParticipants];
+      nextParticipants[idx] = sanitizedPart;
+      const syncedProject = syncProjectSpotsAndTeams({
+        ...proj,
+        participants: nextParticipants,
+      });
+      const saved = await upsertCollectionRecord('projects', String(projectId), syncedProject);
+      res.json(saved);
+    } catch (error: any) {
+      console.error('Failed to update participant profile:', error);
+      res.status(500).json({ error: error.message || 'Failed to update participant profile' });
     }
   });
 

@@ -11,6 +11,7 @@ import {
 import { INITIAL_SPONSORS } from '../data/sponsorsData.ts';
 import {
   syncProjectSpotsAndTeams,
+  syncEventsWithRsvps,
   type NewsArticle,
   type VitalizarEvent,
   type VitalizarProject,
@@ -234,6 +235,10 @@ interface ClubDataContextType {
     logDetails?: string;
     toastMessage?: string;
   }, logMessage?: string) => boolean;
+  updateParticipantProfile: (
+    projectId: string,
+    updatedParticipant: ProjectParticipant
+  ) => Promise<ProjectParticipant | null>;
   toasts: ToastNotification[];
   showToast: (message: string, type?: 'success' | 'info' | 'error') => void;
   removeToast: (id: string) => void;
@@ -287,10 +292,15 @@ function normalizeSiteSettings(raw?: Partial<SiteSettings> | null): SiteSettings
     return DEFAULT_SITE_SETTINGS;
   }
   const defaultDash = DEFAULT_SITE_SETTINGS.transparencyDashboard!;
-  const rawDash =
+  const incomingDash =
     raw.transparencyDashboard && typeof raw.transparencyDashboard === 'object'
       ? raw.transparencyDashboard
       : ({} as Partial<typeof defaultDash>);
+  const isLegacyFictionalDash =
+    incomingDash.totalRevenue === 248600 ||
+    incomingDash.socioTorcedoresTotal === 348 ||
+    incomingDash.socioTorcedoresTiers?.[0]?.count === 192;
+  const rawDash = isLegacyFictionalDash ? ({} as Partial<typeof defaultDash>) : incomingDash;
 
   return {
     ...DEFAULT_SITE_SETTINGS,
@@ -439,6 +449,12 @@ function normalizeSiteSettings(raw?: Partial<SiteSettings> | null): SiteSettings
 }
 
 
+const LEGACY_FICTIONAL_DOC_IDS = new Set([
+  'relatorio-impacto-2026',
+  'balancete-financeiro-2026',
+  'termo-fomento-esporte-base',
+]);
+
 function normalizeTransparencyDocs(raw?: TransparencyDocument[] | null): TransparencyDocument[] {
   if (!Array.isArray(raw) || raw.length === 0) {
     return TRANSPARENCY_DOCUMENTS;
@@ -451,7 +467,7 @@ function normalizeTransparencyDocs(raw?: TransparencyDocument[] | null): Transpa
     const docItem = raw[i];
     if (!docItem || typeof docItem !== 'object') continue;
     const id = docItem.id || `doc-${i + 1}`;
-    if (seenIds.has(id)) continue;
+    if (LEGACY_FICTIONAL_DOC_IDS.has(id) || seenIds.has(id)) continue;
     seenIds.add(id);
 
     const def = defaultMap.get(id);
@@ -477,7 +493,12 @@ function normalizeTransparencyDocs(raw?: TransparencyDocument[] | null): Transpa
     });
   }
 
-  return merged;
+  const realLieDoc = defaultMap.get('projeto-lie-2606344');
+  if (realLieDoc && !seenIds.has('projeto-lie-2606344')) {
+    merged.unshift(realLieDoc);
+  }
+
+  return merged.length > 0 ? merged : TRANSPARENCY_DOCUMENTS;
 }
 
 function normalizeGalleryAlbums(raw?: PastEventPhoto[] | null): PastEventPhoto[] {
@@ -744,6 +765,18 @@ function toPublicSiteSettings(settings: SiteSettings): SiteSettings {
   const { donationPledges, volunteers, ...publicSettings } = settings;
   return {
     ...publicSettings,
+    // Keep only confirmed PIX amounts (without donor PII) so the public Transparency Portal calculates real revenue & supporter counts
+    donationPledges: (donationPledges || [])
+      .filter((d) => d && d.status === 'confirmado')
+      .map((d) => ({
+        id: d.id,
+        protocol: d.protocol,
+        donorName: 'Apoiador Confirmado',
+        amount: Number(d.amount) || 0,
+        purpose: d.purpose || 'Apoio Institucional',
+        date: d.date,
+        status: 'confirmado' as const,
+      })),
     // The site only lists active volunteers, without their contact or motivation
     volunteers: (volunteers || [])
       .filter((v) => v.status === 'ativo')
@@ -1193,7 +1226,31 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       const filtered = filterPrivateCollectionsForUser(rawCombined, activeProfile);
 
-      setRsvps(filtered.rsvps as EventRsvpRecord[]);
+      const loadedRsvps = filtered.rsvps as EventRsvpRecord[];
+      setRsvps(loadedRsvps);
+      setEvents((prev) => {
+        const synced = syncEventsWithRsvps(prev, loadedRsvps);
+        localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(synced));
+        if (canRoleWriteCollection(role, 'events')) {
+          synced.forEach((ev, idx) => {
+            if (prev[idx]?.availableSpots !== ev.availableSpots) {
+              const sanitized = sanitizeForFirestore(ev);
+              setDoc(doc(db, 'events', ev.id), sanitized).catch(() => {});
+              if (token) {
+                fetch('/api/collections/events', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                  },
+                  body: JSON.stringify({ itemId: ev.id, payload: sanitized }),
+                }).catch(() => {});
+              }
+            }
+          });
+        }
+        return synced;
+      });
       setContactMessages(filtered.contact_messages as ContactMessageRecord[]);
       setScoutInquiries(filtered.scout_inquiries as ScoutInquiryRecord[]);
 
@@ -1774,10 +1831,18 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         localStorage.setItem(STORAGE_KEYS.SPONSORS, JSON.stringify(safeSponsors));
         setSponsors(safeSponsors);
       }
-      if (payload.events !== undefined) {
-        const safeEvents = normalizeEvents(payload.events);
-        localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(safeEvents));
-        setEvents(safeEvents);
+      const effectiveRsvps = payload.rsvps !== undefined ? payload.rsvps : rsvps;
+      const syncedEvents =
+        payload.events !== undefined || payload.rsvps !== undefined
+          ? syncEventsWithRsvps(
+              normalizeEvents(payload.events !== undefined ? payload.events : events),
+              effectiveRsvps
+            )
+          : null;
+
+      if (syncedEvents) {
+        localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(syncedEvents));
+        setEvents(syncedEvents);
       }
       if (payload.projects !== undefined) {
         const safeProjects = normalizeProjects(payload.projects);
@@ -1921,8 +1986,8 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (payload.sponsors !== undefined && canRoleWriteCollection(userRole, 'sponsors')) {
         syncList('sponsors', normalizeSponsors(payload.sponsors), sponsors);
       }
-      if (payload.events !== undefined && canRoleWriteCollection(userRole, 'events')) {
-        syncList('events', normalizeEvents(payload.events), events);
+      if (syncedEvents && canRoleWriteCollection(userRole, 'events')) {
+        syncList('events', syncedEvents, events, payload.events === undefined);
       }
       if (payload.projects !== undefined && canRoleWriteCollection(userRole, 'projects')) {
         const normalized = normalizeProjects(payload.projects);
@@ -1983,6 +2048,81 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const updateParticipantProfile = async (
+    projectId: string,
+    updatedParticipant: ProjectParticipant
+  ): Promise<ProjectParticipant | null> => {
+    const targetProject =
+      projects.find((p) => p.id === projectId) ||
+      projects.find((p) => p.participants?.some((pt) => pt.id === updatedParticipant.id)) ||
+      projects[0];
+    if (!targetProject) return null;
+
+    const sanitizedPart = sanitizeShowcaseParticipant(updatedParticipant);
+    const updatedProjects = normalizeProjects(
+      projects.map((pr) => {
+        if (pr.id !== targetProject.id) return pr;
+        const exists = (pr.participants || []).some((pt) => pt.id === sanitizedPart.id);
+        const nextParticipants = exists
+          ? (pr.participants || []).map((pt) =>
+              pt.id === sanitizedPart.id ? sanitizedPart : pt
+            )
+          : [...(pr.participants || []), sanitizedPart];
+        return syncProjectSpotsAndTeams({
+          ...pr,
+          participants: nextParticipants,
+        });
+      })
+    );
+
+    const syncedProject = updatedProjects.find((p) => p.id === targetProject.id);
+    const syncedPart =
+      syncedProject?.participants?.find((pt) => pt.id === sanitizedPart.id) || sanitizedPart;
+
+    localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(updatedProjects));
+    setProjects(updatedProjects);
+
+    if (syncedProject) {
+      const publicProj = sanitizeForFirestore({
+        ...syncedProject,
+        participants: (syncedProject.participants || []).map((pt) =>
+          sanitizeShowcaseParticipant(pt)
+        ),
+      });
+      const fsPromise = Promise.resolve().then(() =>
+        setDoc(doc(db, 'projects', syncedProject.id), publicProj)
+      );
+      const apiPromise = fetch('/api/participants/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: syncedProject.id,
+          participant: syncedPart,
+        }),
+      }).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
+
+      const results = await Promise.allSettled([apiPromise, fsPromise]);
+      const anySuccess = results.some((r) => r.status === 'fulfilled');
+      if (anySuccess) {
+        showToast(
+          `Perfil e informações de ${syncedPart.name} atualizados em tempo real!`,
+          'success'
+        );
+      } else {
+        showToast(`Perfil de ${syncedPart.name} atualizado neste dispositivo.`, 'info');
+      }
+      addAuditLog(
+        'ATLETA_PERFIL_ATUALIZADO',
+        `Perfil do participante "${syncedPart.name}" atualizado na modalidade ${syncedPart.modality || 'Esporte'} (${syncedPart.position}).`
+      );
+    }
+
+    return syncedPart;
+  };
+
   return (
     <ClubDataContext.Provider
       value={{
@@ -2014,6 +2154,7 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         exportDatabaseJson,
         importDatabaseJson,
         saveAdminChanges,
+        updateParticipantProfile,
         toasts,
         showToast,
         removeToast,

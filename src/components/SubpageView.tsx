@@ -72,6 +72,8 @@ import {
   ProjectParticipant,
   ProjectStaffMember,
   PlayerHighlightVideo,
+  computeTransparencyDashboard,
+  syncProjectSpotsAndTeams,
 } from '../types/index.ts';
 import { EventsCalendar } from './EventsCalendar.tsx';
 import { SponsorsSection } from './SponsorsSection.tsx';
@@ -142,6 +144,7 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
   const [projectsViewMode, setProjectsViewMode] = useState<'catalogo' | 'participantes'>('catalogo');
   const [projectsParticipantFilter, setProjectsParticipantFilter] = useState<string>('all');
   const [selectedPlayer, setSelectedPlayer] = useState<ProjectParticipant | null>(null);
+  const [playerEditMode, setPlayerEditMode] = useState<boolean>(false);
   const [activePlayerVideo, setActivePlayerVideo] = useState<PlayerHighlightVideo | null>(null);
   const [scoutModalOpen, setScoutModalOpen] = useState<boolean>(false);
   const [scoutTargetPlayer, setScoutTargetPlayer] = useState<ProjectParticipant | null>(null);
@@ -437,7 +440,14 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
               setDirectEnrollProject(p);
               setDirectEnrollTeamId(teamId);
             }}
-            onInspectPlayer={(p) => setSelectedPlayer(p)}
+            onInspectPlayer={(p) => {
+              setPlayerEditMode(false);
+              setSelectedPlayer(p);
+            }}
+            onEditPlayer={(p) => {
+              setPlayerEditMode(true);
+              setSelectedPlayer(p);
+            }}
             onOpenScoutContact={(p) => {
               setScoutTargetPlayer(p);
               setScoutModalOpen(true);
@@ -446,10 +456,14 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
 
           <PlayerScoutModal
             isOpen={!!selectedPlayer}
-            onClose={() => setSelectedPlayer(null)}
+            onClose={() => {
+              setSelectedPlayer(null);
+              setPlayerEditMode(false);
+            }}
             player={selectedPlayer}
             shieldUrl={currentLiveProject?.shieldUrl}
             projectName={currentLiveProject?.name}
+            initialEditMode={playerEditMode}
             onOpenScoutContact={(p) => {
               setScoutTargetPlayer(p);
               setScoutModalOpen(true);
@@ -550,20 +564,36 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
         {/* PROJECTS CATALOG GRID */}
         {(
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {projects.map((proj) => {
+            {projects.map((rawProj) => {
+              const proj = syncProjectSpotsAndTeams(rawProj);
               const tot = proj.totalSpots ?? 100;
-              const participantCount = proj.participants?.length || 0;
-              const fill = participantCount;
-              const avail = Math.max(0, tot - fill);
+              const fill = proj.filledSpots ?? (proj.participants?.length || 0);
+              const avail = proj.availableSpots ?? Math.max(0, tot - fill);
               const pct = Math.min(100, Math.round((fill / Math.max(1, tot)) * 100));
               const staffCount = proj.staff?.length || 0;
+              const liveDash = computeTransparencyDashboard(
+                siteSettings?.transparencyDashboard || DEFAULT_SITE_SETTINGS.transparencyDashboard!,
+                projects,
+                siteSettings?.donationPledges
+              );
+              const modalityCounts = (proj.teams || []).reduce<Record<string, { teams: number; filled: number; total: number }>>(
+                (acc, tm) => {
+                  const key = tm.modality || 'Esporte';
+                  if (!acc[key]) acc[key] = { teams: 0, filled: 0, total: 0 };
+                  acc[key].teams += 1;
+                  acc[key].filled += tm.filledSpots ?? 0;
+                  acc[key].total += tm.totalSpots || 0;
+                  return acc;
+                },
+                {}
+              );
 
               return (
                 <div
                   key={proj.id}
                   className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden flex flex-col justify-between shadow-xs hover:shadow-lg hover:border-sky-300 transition-all group"
                 >
-                  {/* Image Banner with Floating Official Shield */}
+                  {/* Image Banner with Floating Official Shield & Live Firebase KPI Badge */}
                   <div className="relative aspect-16/10 bg-slate-900 overflow-hidden">
                     <img
                       src={proj.imageUrl}
@@ -571,7 +601,7 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                       referrerPolicy="no-referrer"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-90"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/30 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/35 to-transparent" />
 
                     {/* Floating Project Shield */}
                     {proj.shieldUrl && (
@@ -587,9 +617,15 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                       </div>
                     )}
 
-                    {/* Category Pill */}
-                    <div className="absolute top-3 right-3 px-2.5 py-1 rounded-full bg-slate-900/80 backdrop-blur-xs border border-white/20 text-white text-[10px] font-bold uppercase tracking-wider">
-                      {proj.category.replace('_', ' ')}
+                    {/* Live Firebase Transparency KPI Pill */}
+                    <div className="absolute top-3 right-3 flex flex-col items-end gap-1">
+                      <div className="px-2.5 py-1 rounded-full bg-slate-900/85 backdrop-blur-xs border border-emerald-400/40 text-emerald-300 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                        <Activity className="w-3 h-3 text-emerald-400" />
+                        <span>Firebase Live · {pct}% Ocupação</span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full bg-slate-900/75 text-white text-[9px] font-mono font-bold">
+                        {liveDash.auditStatus} · {liveDash.fiscalYear}
+                      </span>
                     </div>
 
                     {/* Bottom Image Info */}
@@ -599,7 +635,7 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                         <span>{proj.location}</span>
                       </span>
                       <span className="px-2 py-0.5 rounded bg-emerald-500/90 text-white text-[10px] font-bold shrink-0">
-                        Gratuito
+                        {fill}/{tot} vagas · Gratuito
                       </span>
                     </div>
                   </div>
@@ -620,12 +656,12 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                       </p>
                     </div>
 
-                    {/* Live Spots Bar */}
-                    <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    {/* Live Spots & Modality Breakdown Bar */}
+                    <div className="space-y-2 p-3 rounded-xl bg-slate-50 border border-slate-100">
                       <div className="flex items-center justify-between text-[11px] font-bold">
                         <span className="text-slate-700 flex items-center gap-1">
                           <Users className="w-3.5 h-3.5 text-[#0284c7]" />
-                          <span>Vagas Disponíveis:</span>
+                          <span>KPI de Vagas (Tempo Real):</span>
                         </span>
                         <span className="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded font-extrabold text-[10px]">
                           {avail} vagas abertas
@@ -638,12 +674,27 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                         />
                       </div>
                       <div className="flex items-center justify-between text-[10px] text-slate-500">
-                        <span>{participantCount} participantes vinculados</span>
-                        <span>Total: {tot} vagas</span>
+                        <span>{fill} atletas inscritos</span>
+                        <span>Capacidade oficial: {tot} vagas</span>
                       </div>
+                      {Object.keys(modalityCounts).length > 0 && (
+                        <div className="grid grid-cols-2 gap-1.5 pt-1.5 border-t border-slate-200/70">
+                          {Object.entries(modalityCounts).map(([modName, data]) => (
+                            <div
+                              key={modName}
+                              className="px-2 py-1 rounded-lg bg-white border border-slate-200/80 flex items-center justify-between text-[10px]"
+                            >
+                              <span className="font-bold text-slate-800 truncate">{modName}</span>
+                              <span className="font-mono font-bold text-[#0284c7]">
+                                {data.filled}/{data.total} ({data.teams}t)
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
-                    {/* Team, Participants & Scouts Mini Indicators */}
+                    {/* Team, Participants & Transparency Mini Indicators */}
                     <div className="grid grid-cols-3 gap-2 text-[11px] pt-1">
                       <div className="p-2 rounded-lg bg-sky-50/70 border border-sky-100/80">
                         <span className="text-[10px] font-bold uppercase text-[#0284c7] block truncate">
@@ -662,22 +713,22 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                           window.scrollTo({ top: 0, behavior: 'smooth' });
                         }}
                         className="p-2 rounded-lg bg-emerald-50/80 hover:bg-emerald-100 border border-emerald-200/80 text-left transition-colors cursor-pointer"
-                        title="Ver e associar participantes (.CSV) deste projeto"
+                        title="Ver e editar perfis de participantes deste projeto"
                       >
                         <span className="text-[10px] font-bold uppercase text-emerald-800 block truncate">
                           Participantes
                         </span>
                         <span className="font-extrabold text-emerald-950 truncate block mt-0.5">
-                          {participantCount} alunos →
+                          {fill} alunos →
                         </span>
                       </button>
 
                       <div className="p-2 rounded-lg bg-amber-50/70 border border-amber-100/80">
                         <span className="text-[10px] font-bold uppercase text-amber-700 block truncate">
-                          Olheiros
+                          Execução MROSC
                         </span>
                         <span className="font-semibold text-slate-800 truncate block mt-0.5">
-                          {participantCount > 0 ? `${participantCount} Fichas` : 'Ativo'}
+                          R$ {(liveDash.totalInvested / 1000).toFixed(0)}k inv.
                         </span>
                       </div>
                     </div>
@@ -733,7 +784,7 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                             window.scrollTo({ top: 0, behavior: 'smooth' });
                           }}
                           className="py-2.5 px-2 bg-emerald-50 hover:bg-emerald-700 text-emerald-800 hover:text-white border border-emerald-200 font-bold text-[11px] rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1"
-                          title="Abrir visualização de Participantes deste projeto"
+                          title="Abrir visualização e edição de Participantes deste projeto"
                         >
                           <Users className="w-3 h-3 shrink-0" />
                           <span>Participantes</span>
@@ -766,10 +817,14 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
             <>
               <PlayerScoutModal
                 isOpen={!!selectedPlayer}
-                onClose={() => setSelectedPlayer(null)}
+                onClose={() => {
+                  setSelectedPlayer(null);
+                  setPlayerEditMode(false);
+                }}
                 player={selectedPlayer}
                 shieldUrl={playerProj?.shieldUrl}
                 projectName={playerProj?.name}
+                initialEditMode={playerEditMode}
                 onOpenScoutContact={(p) => {
                   setScoutTargetPlayer(p);
                   setScoutModalOpen(true);
@@ -974,14 +1029,18 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
   };
 
   const handleExportTransparencyCsv = () => {
-    const dash = siteSettings.transparencyDashboard || DEFAULT_SITE_SETTINGS.transparencyDashboard!;
+    const dash = computeTransparencyDashboard(
+      siteSettings.transparencyDashboard || DEFAULT_SITE_SETTINGS.transparencyDashboard!,
+      projects,
+      siteSettings.donationPledges
+    );
     const rows = [
       ['Tipo de Registro', 'Identificador / Protocolo', 'Título / Indicador', 'Categoria', 'Data / Período', 'Valor / Métrica', 'Status'],
-      ['INDICADOR', 'SOCIO-TOTAL', 'Sócio-Torcedores Ativos', 'Quadro Associativo', dash.fiscalYear, `${dash.socioTorcedoresTotal} sócios (Meta: ${dash.socioTorcedoresGoal})`, 'Ativo'],
-      ['INDICADOR', 'SOCIO-MES', 'Novos Sócio-Torcedores no Mês', 'Quadro Associativo', dash.fiscalYear, `+${dash.socioTorcedoresNewMonth} adesões`, 'Verificado'],
-      ['INDICADOR', 'FIN-RECEITA', 'Receita Total Captada no Exercício', 'Financeiro', dash.fiscalYear, `R$ ${dash.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, dash.auditStatus],
-      ['INDICADOR', 'FIN-INVESTIDO', 'Investimento Direto em Projetos Sociais', 'Financeiro', dash.fiscalYear, `R$ ${dash.totalInvested.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'Auditado'],
-      ['INDICADOR', 'IMPACTO-DIRETO', 'Beneficiários Atendidos Gratuitamente', 'Impacto Social', dash.fiscalYear, `${dash.directBeneficiaries} pessoas`, 'Confirmado'],
+      ['INDICADOR', 'SOCIO-TOTAL', 'Sócio-Torcedores e Apoiadores Ativos', 'Quadro Associativo', dash.fiscalYear, `${dash.socioTorcedoresTotal} (${dash.tiersMembersCount} planos + ${dash.confirmedPixCount} PIX confirmados)`, 'Ativo'],
+      ['INDICADOR', 'SOCIO-MES', 'Novos Sócio-Torcedores / Apoios no Mês', 'Quadro Associativo', dash.fiscalYear, `+${dash.socioTorcedoresNewMonth} adesões`, 'Verificado'],
+      ['INDICADOR', 'FIN-RECEITA', 'Receita Total Captada no Exercício (Soma das Fontes)', 'Financeiro', dash.fiscalYear, `R$ ${dash.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, dash.auditStatus],
+      ['INDICADOR', 'FIN-INVESTIDO', 'Investimento Direto em Projetos Sociais (Soma das Rubricas)', 'Financeiro', dash.fiscalYear, `R$ ${dash.totalInvested.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'Auditado'],
+      ['INDICADOR', 'IMPACTO-DIRETO', 'Vagas e Beneficiários nos Projetos Ativos', 'Impacto Social', dash.fiscalYear, `${dash.activeParticipantsCount} matriculados / ${dash.directBeneficiaries} vagas`, 'Confirmado'],
       ...transparencyDocs.map((d) => [
         'DOCUMENTO',
         d.protocolNumber || d.id,
@@ -1026,28 +1085,15 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
 
   const renderTransparencia = () => {
     const defaultDash = DEFAULT_SITE_SETTINGS.transparencyDashboard!;
-    const rawDash = siteSettings?.transparencyDashboard || defaultDash;
-    const dash = {
+    const rawDash = {
       ...defaultDash,
-      ...rawDash,
-      socioTorcedoresTiers:
-        Array.isArray(rawDash.socioTorcedoresTiers) && rawDash.socioTorcedoresTiers.length > 0
-          ? rawDash.socioTorcedoresTiers
-          : defaultDash.socioTorcedoresTiers,
-      socioTorcedoresMonthlyGrowth:
-        Array.isArray(rawDash.socioTorcedoresMonthlyGrowth) &&
-        rawDash.socioTorcedoresMonthlyGrowth.length > 0
-          ? rawDash.socioTorcedoresMonthlyGrowth
-          : defaultDash.socioTorcedoresMonthlyGrowth,
-      allocationBreakdown:
-        Array.isArray(rawDash.allocationBreakdown) && rawDash.allocationBreakdown.length > 0
-          ? rawDash.allocationBreakdown
-          : defaultDash.allocationBreakdown,
-      revenueSources:
-        Array.isArray(rawDash.revenueSources) && rawDash.revenueSources.length > 0
-          ? rawDash.revenueSources
-          : defaultDash.revenueSources,
+      ...(siteSettings?.transparencyDashboard || {}),
     };
+    const dash = computeTransparencyDashboard(
+      rawDash,
+      projects,
+      siteSettings?.donationPledges
+    );
     const socioGoalPercent = Math.min(
       100,
       Math.round((dash.socioTorcedoresTotal / Math.max(1, dash.socioTorcedoresGoal)) * 100)
@@ -1055,11 +1101,11 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
     const directExecutionPercent =
       dash.totalRevenue > 0
         ? ((dash.totalInvested / dash.totalRevenue) * 100).toFixed(1).replace('.', ',')
-        : '94,2';
+        : '0,0';
 
     const maxGrowthCount = Math.max(
       ...dash.socioTorcedoresMonthlyGrowth.map((m) => Number(m?.count) || 0),
-      100
+      10
     );
 
     const filterGroups = [
@@ -1212,7 +1258,7 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white p-6 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
             <div className="flex items-center justify-between text-xs text-slate-500">
-              <span>Sócio-Torcedores Ativos</span>
+              <span>Sócios & Apoiadores Confirmados</span>
               <Users className="w-4 h-4 text-[#0284c7]" />
             </div>
             <div>
@@ -1220,7 +1266,7 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                 {dash.socioTorcedoresTotal.toLocaleString('pt-BR')}
               </div>
               <div className="text-xs text-slate-500 mt-1 font-mono tabular-nums">
-                +{dash.socioTorcedoresNewMonth} novas adesões no mês · Meta {dash.socioTorcedoresGoal}
+                {dash.tiersMembersCount} em planos + {dash.confirmedPixCount} PIX · Meta {dash.socioTorcedoresGoal}
               </div>
             </div>
           </div>
@@ -1235,7 +1281,7 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                 R$ {dash.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </div>
               <div className="text-xs text-slate-500 mt-1">
-                Fomento MROSC, Sócio-Torcedor e Parceiros
+                Soma automática das fontes de custeio e PIX confirmados
               </div>
             </div>
           </div>
@@ -1250,22 +1296,24 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                 R$ {dash.totalInvested.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </div>
               <div className="text-xs text-emerald-700 font-medium mt-1 font-mono tabular-nums">
-                {directExecutionPercent}% aplicado direto na atividade-fim
+                {dash.totalRevenue > 0
+                  ? `${directExecutionPercent}% da receita captada aplicada`
+                  : 'Soma automática das rubricas de execução'}
               </div>
             </div>
           </div>
 
           <div className="bg-white p-6 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
             <div className="flex items-center justify-between text-xs text-slate-500">
-              <span>Beneficiários Diretos</span>
+              <span>Vagas & Beneficiários (Projetos)</span>
               <Award className="w-4 h-4 text-[#0284c7]" />
             </div>
             <div>
               <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tabular-nums">
-                {dash.directBeneficiaries.toLocaleString('pt-BR')}
+                {dash.activeParticipantsCount} / {dash.directBeneficiaries}
               </div>
               <div className="text-xs text-slate-500 mt-1">
-                Atendimento 100% gratuito em Cariacica/ES
+                {dash.activeParticipantsCount} matriculados em {dash.totalTeamsCount} times ({projects.length} projeto{projects.length === 1 ? '' : 's'})
               </div>
             </div>
           </div>
@@ -1330,9 +1378,10 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                 </h3>
                 <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
                   {dash.socioTorcedoresTiers.map((tier) => {
-                    const tierPct = Math.round(
-                      (tier.count / Math.max(1, dash.socioTorcedoresTotal)) * 100
-                    );
+                    const tierPct =
+                      dash.socioTorcedoresTotal > 0
+                        ? Math.round((tier.count / dash.socioTorcedoresTotal) * 100)
+                        : 0;
                     return (
                       <div
                         key={tier.id}
@@ -1341,7 +1390,7 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-bold text-slate-900">{tier.name}</span>
                           <span className="text-xs font-bold text-[#0284c7] font-mono tabular-nums">
-                            {tier.count} sócios ({tierPct}%)
+                            {tier.count} sócio{tier.count === 1 ? '' : 's'} ({tierPct}%)
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-500 leading-relaxed">
@@ -1365,6 +1414,19 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                       </div>
                     );
                   })}
+                  <div className="p-3.5 bg-emerald-50/50 space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-slate-900">
+                        Apoiadores via PIX Oficial Confirmado
+                      </span>
+                      <span className="text-xs font-bold text-emerald-700 font-mono tabular-nums">
+                        {dash.confirmedPixCount} apoio{dash.confirmedPixCount === 1 ? '' : 's'} (R$ {dash.confirmedPixAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Contabilizado automaticamente a partir das doações PIX homologadas pela Tesouraria.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>

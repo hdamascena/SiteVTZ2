@@ -45,11 +45,19 @@ export const CommunityHubView: React.FC<CommunityHubViewProps> = ({
   const {
     clubInfo,
     siteSettings,
+    projects,
     addDonationPledge,
     addVolunteerApplication,
     showToast,
     addAuditLog,
   } = useClubData();
+
+  const totalBeneficiariesRef = useMemo(() => {
+    const projectSpots = projects.reduce((sum, p) => sum + (p.totalSpots || 0), 0);
+    return projectSpots > 0
+      ? projectSpots
+      : siteSettings.transparencyDashboard?.directBeneficiaries || 300;
+  }, [projects, siteSettings.transparencyDashboard]);
 
   const [activeTab, setActiveTab] = useState<CommunityHubTab>(initialTab);
 
@@ -294,7 +302,7 @@ export const CommunityHubView: React.FC<CommunityHubViewProps> = ({
                   Apoie via PIX & Calculadora de Impacto
                 </h3>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Ajude a financiar bolas, coletes, lanches e uniformes para 415 crianças e idosos com QR Code e PIX Copia e Cola.
+                  Ajude a financiar bolas, coletes, lanches e uniformes para {totalBeneficiariesRef} crianças e jovens atendidos nos polos esportivos com QR Code e PIX Copia e Cola.
                 </p>
               </div>
               <button

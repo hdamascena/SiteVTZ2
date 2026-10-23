@@ -234,9 +234,168 @@ export interface VitalizarProject {
   attachments?: AttachedFile[];
 }
 
+export interface ParticipantModalityProfile {
+  modalityKey: 'voleibol' | 'futsal';
+  modalityName: 'Voleibol' | 'Futsal';
+  positions: string[];
+  defaultPosition: string;
+  dominanceLabel: string;
+  dominanceShortLabel: string;
+  tacticalSectorLabel: string;
+  photosTabLabel: string;
+  videosTabLabel: string;
+  statLabels: {
+    pace: { short: string; full: string };
+    shooting: { short: string; full: string };
+    passing: { short: string; full: string };
+    dribbling: { short: string; full: string };
+    defending: { short: string; full: string };
+    physical: { short: string; full: string };
+  };
+}
+
+export function getParticipantModalityProfile(
+  modality?: string,
+  modalityOrClass?: string
+): ParticipantModalityProfile {
+  const combined = `${modality || ''} ${modalityOrClass || ''}`.toLowerCase();
+  const isFutsal = combined.includes('futsal') || combined.includes('futebol');
+
+  if (isFutsal) {
+    return {
+      modalityKey: 'futsal',
+      modalityName: 'Futsal',
+      positions: ['Ala', 'Fixo', 'Pivô', 'Goleiro(a)'],
+      defaultPosition: 'Ala',
+      dominanceLabel: 'Pé Dominante',
+      dominanceShortLabel: 'Pé',
+      tacticalSectorLabel: 'Função Tática no Futsal',
+      photosTabLabel: 'Fotos em Quadra (Futsal)',
+      videosTabLabel: 'Lances de Quadra',
+      statLabels: {
+        pace: { short: 'VEL', full: 'Velocidade & Explosão' },
+        shooting: { short: 'FIN', full: 'Finalização & Chute' },
+        passing: { short: 'PAS', full: 'Passe & Visão de Jogo' },
+        dribbling: { short: 'DRI', full: 'Drible & Controle de Bola' },
+        defending: { short: 'DEF', full: 'Marcação & Desarme' },
+        physical: { short: 'FIS', full: 'Físico & Resistência' },
+      },
+    };
+  }
+
+  return {
+    modalityKey: 'voleibol',
+    modalityName: 'Voleibol',
+    positions: ['Ponteiro(a)', 'Levantador(a)', 'Central', 'Oposto(a)', 'Líbero'],
+    defaultPosition: 'Ponteiro(a)',
+    dominanceLabel: 'Mão Dominante',
+    dominanceShortLabel: 'Mão',
+    tacticalSectorLabel: 'Função em Quadra (Voleibol)',
+    photosTabLabel: 'Fotos em Quadra (Voleibol)',
+    videosTabLabel: 'Ralis & Fundamentos',
+    statLabels: {
+      pace: { short: 'SAQ', full: 'Saque & Potência' },
+      shooting: { short: 'ATA', full: 'Ataque & Cortada' },
+      passing: { short: 'LEV', full: 'Levantamento & Toque' },
+      dribbling: { short: 'REC', full: 'Recepção & Manchete' },
+      defending: { short: 'BLO', full: 'Bloqueio & Rede' },
+      physical: { short: 'IMP', full: 'Impulsão & Alcance' },
+    },
+  };
+}
+
+export function derivePositionGroup(
+  position: string,
+  modality?: string,
+  modalityOrClass?: string
+): ProjectParticipant['positionGroup'] {
+  const lower = (position || '').toLowerCase();
+  const profile = getParticipantModalityProfile(modality, modalityOrClass);
+  if (profile.modalityKey === 'voleibol') {
+    if (lower.includes('líbero') || lower.includes('libero')) return 'goleiro';
+    if (lower.includes('central')) return 'defesa';
+    if (lower.includes('levantador')) return 'meio';
+    return 'ataque';
+  }
+  if (lower.includes('goleir')) return 'goleiro';
+  if (lower.includes('fixo') || lower.includes('zagueir') || lower.includes('defes')) return 'defesa';
+  if (lower.includes('ala') || lower.includes('meia')) return 'meio';
+  return 'ataque';
+}
+
+export function normalizeParticipantPositionForModality(
+  currentPosition: string | undefined,
+  modality?: string,
+  modalityOrClass?: string
+): string {
+  const profile = getParticipantModalityProfile(modality, modalityOrClass);
+  const pos = (currentPosition || '').trim();
+  if (!pos || pos.toLowerCase() === 'atleta') {
+    return profile.defaultPosition;
+  }
+  const lower = pos.toLowerCase();
+  if (profile.modalityKey === 'voleibol') {
+    const futsalOnly = ['ala', 'fixo', 'pivô', 'pivo', 'goleiro', 'goleira', 'zagueiro', 'centroavante', 'volante', 'meia', 'lateral'];
+    if (futsalOnly.some((f) => lower === f)) {
+      return profile.defaultPosition;
+    }
+    if (lower === 'ponteira' || lower === 'ponteiro') return 'Ponteiro(a)';
+    if (lower === 'levantadora' || lower === 'levantador') return 'Levantador(a)';
+    if (lower === 'oposta' || lower === 'oposto') return 'Oposto(a)';
+    if (lower === 'libero') return 'Líbero';
+    return pos;
+  } else {
+    const volleyOnly = ['ponteira', 'ponteiro', 'ponteiro(a)', 'levantador', 'levantadora', 'levantador(a)', 'central', 'oposto', 'oposta', 'oposto(a)', 'líbero', 'libero'];
+    if (volleyOnly.some((v) => lower === v)) {
+      return profile.defaultPosition;
+    }
+    return pos;
+  }
+}
+
 export function syncProjectSpotsAndTeams(project: VitalizarProject): VitalizarProject {
-  const participants = Array.isArray(project.participants) ? project.participants : [];
+  const rawParticipants = Array.isArray(project.participants) ? project.participants : [];
   const rawTeams = Array.isArray(project.teams) ? project.teams : [];
+
+  // Synchronize each participant with their enrolled Team/Turma and Modality
+  const participants: ProjectParticipant[] = rawParticipants.map((p) => {
+    const matchedTeam =
+      rawTeams.find((t) => t.id === p.teamId) ||
+      rawTeams.find(
+        (t) =>
+          p.modalityOrClass &&
+          p.modalityOrClass.toLowerCase().includes(t.name.toLowerCase())
+      ) ||
+      (p.modality
+        ? rawTeams.find((t) => t.modality.toLowerCase() === p.modality!.toLowerCase())
+        : undefined);
+
+    const effectiveModality = matchedTeam?.modality || p.modality || 'Voleibol';
+    const effectiveModalityOrClass = matchedTeam
+      ? `${matchedTeam.name} (${matchedTeam.modality} · ${matchedTeam.polo})`
+      : p.modalityOrClass || project.name;
+    const effectiveCategory = matchedTeam?.category || p.category || 'Sub-16';
+    const normalizedPosition = normalizeParticipantPositionForModality(
+      p.position,
+      effectiveModality,
+      effectiveModalityOrClass
+    );
+    const positionGroup = derivePositionGroup(
+      normalizedPosition,
+      effectiveModality,
+      effectiveModalityOrClass
+    );
+
+    return {
+      ...p,
+      teamId: matchedTeam?.id || p.teamId,
+      modality: effectiveModality,
+      modalityOrClass: effectiveModalityOrClass,
+      category: effectiveCategory,
+      position: normalizedPosition,
+      positionGroup,
+    };
+  });
 
   const syncedTeams: ProjectTeamClass[] = rawTeams.map((team) => {
     const teamTotal = Math.max(0, Number(team.totalSpots) || 0);
@@ -365,6 +524,164 @@ export interface TransparencyDashboardConfig {
   }[];
 }
 
+export interface ComputedTransparencyDashboard extends TransparencyDashboardConfig {
+  activeParticipantsCount: number;
+  totalProjectSpotsCount: number;
+  totalTeamsCount: number;
+  confirmedPixCount: number;
+  confirmedPixAmount: number;
+  tiersMembersCount: number;
+}
+
+export function computeTransparencyDashboard(
+  rawDash: Partial<TransparencyDashboardConfig> | undefined,
+  projects: VitalizarProject[] = [],
+  donationPledges: DonationPledgeRecord[] = []
+): ComputedTransparencyDashboard {
+  const syncedProjects = (projects || []).map((p) => syncProjectSpotsAndTeams(p));
+  const totalProjectSpotsCount = syncedProjects.reduce((s, p) => s + (p.totalSpots || 0), 0);
+  const activeParticipantsCount = syncedProjects.reduce(
+    (s, p) => s + (p.participants || []).filter((pt) => pt.enrollmentStatus !== 'inativo').length,
+    0
+  );
+  const totalTeamsCount = syncedProjects.reduce((s, p) => s + (p.teams?.length || 0), 0);
+
+  const confirmedPix = (donationPledges || []).filter((d) => d && d.status === 'confirmado');
+  const confirmedPixCount = confirmedPix.length;
+  const confirmedPixAmount = confirmedPix.reduce(
+    (s, d) => s + Math.max(0, Number(d.amount) || 0),
+    0
+  );
+
+  const baseTiers: SocioTorcedorTier[] =
+    Array.isArray(rawDash?.socioTorcedoresTiers) && rawDash!.socioTorcedoresTiers.length > 0
+      ? rawDash!.socioTorcedoresTiers.map((t, i) => ({
+          id: t?.id || `tier-${i}`,
+          name: t?.name || 'Sócio Contribuinte',
+          count: Math.max(0, Math.floor(Number(t?.count)) || 0),
+          monthlyContribution: t?.monthlyContribution || 'R$ 25,00 / mês',
+          benefitSummary: t?.benefitSummary || '',
+        }))
+      : [];
+
+  const tiersMembersCount = baseTiers.reduce((s, t) => s + t.count, 0);
+  const socioTorcedoresTotal = tiersMembersCount + confirmedPixCount;
+  const socioTorcedoresGoal = Math.max(1, Number(rawDash?.socioTorcedoresGoal) || 100);
+
+  const rawGrowth =
+    Array.isArray(rawDash?.socioTorcedoresMonthlyGrowth) &&
+    rawDash!.socioTorcedoresMonthlyGrowth.length > 0
+      ? rawDash!.socioTorcedoresMonthlyGrowth.map((m, i) => ({
+          month: m?.month || `M${i + 1}`,
+          count: Math.max(0, Math.floor(Number(m?.count)) || 0),
+        }))
+      : [{ month: 'Atual', count: socioTorcedoresTotal }];
+
+  const socioTorcedoresMonthlyGrowth = rawGrowth.map((item, idx) =>
+    idx === rawGrowth.length - 1 ? { ...item, count: socioTorcedoresTotal } : item
+  );
+
+  const prevMonthCount =
+    socioTorcedoresMonthlyGrowth.length >= 2
+      ? socioTorcedoresMonthlyGrowth[socioTorcedoresMonthlyGrowth.length - 2].count
+      : 0;
+  const socioTorcedoresNewMonth = Math.max(
+    confirmedPixCount,
+    Math.max(0, socioTorcedoresTotal - prevMonthCount)
+  );
+
+  // Manual revenue sources (excluding auto-generated PIX row so it is never double-counted)
+  const manualSources = (rawDash?.revenueSources || [])
+    .filter((r) => r && !String(r.label || '').startsWith('Doações PIX Confirmadas'))
+    .map((r) => ({
+      label: r.label || 'Fonte de Custeio',
+      amount: Math.max(0, Number(r.amount) || 0),
+      percentage: 0,
+    }));
+
+  const combinedSources = [
+    ...manualSources,
+    {
+      label: `Doações PIX Confirmadas (${confirmedPixCount} apoio${confirmedPixCount === 1 ? '' : 's'})`,
+      amount: confirmedPixAmount,
+      percentage: 0,
+    },
+  ];
+
+  const totalRevenue = combinedSources.reduce((s, r) => s + r.amount, 0);
+  const revenueSources = combinedSources.map((r) => ({
+    ...r,
+    percentage: totalRevenue > 0 ? Math.round((r.amount / totalRevenue) * 100) : 0,
+  }));
+
+  const rawAllocations = (rawDash?.allocationBreakdown || []).map((a) => ({
+    label: a?.label || 'Área Estatutária',
+    description: a?.description || '',
+    amount: Math.max(0, Number(a?.amount) || 0),
+    percentage: 0,
+  }));
+
+  const totalInvested = rawAllocations.reduce((s, a) => s + a.amount, 0);
+  const allocationBreakdown = rawAllocations.map((a) => ({
+    ...a,
+    percentage: totalInvested > 0 ? Math.round((a.amount / totalInvested) * 100) : 0,
+  }));
+
+  return {
+    fiscalYear: rawDash?.fiscalYear || String(new Date().getFullYear()),
+    auditStatus:
+      rawDash?.auditStatus || 'Contabilidade em Conformidade · Lei Federal nº 13.019/2014 (MROSC)',
+    lastAuditDate: rawDash?.lastAuditDate || new Date().toLocaleDateString('pt-BR'),
+    socioTorcedoresRetentionRate:
+      socioTorcedoresTotal > 0 ? rawDash?.socioTorcedoresRetentionRate || '100%' : '—',
+    socioTorcedoresTotal,
+    socioTorcedoresGoal,
+    socioTorcedoresNewMonth,
+    socioTorcedoresTiers: baseTiers,
+    socioTorcedoresMonthlyGrowth,
+    totalRevenue,
+    totalInvested,
+    directBeneficiaries: totalProjectSpotsCount,
+    allocationBreakdown,
+    revenueSources,
+    activeParticipantsCount,
+    totalProjectSpotsCount,
+    totalTeamsCount,
+    confirmedPixCount,
+    confirmedPixAmount,
+    tiersMembersCount,
+  };
+}
+
+// Self-check for transparency dashboard source calculation
+{
+  const check = computeTransparencyDashboard(
+    {
+      socioTorcedoresGoal: 100,
+      socioTorcedoresTiers: [
+        { id: 't1', name: 'Raiz', count: 2, monthlyContribution: 'R$ 25', benefitSummary: '' },
+      ],
+      revenueSources: [{ label: 'Fomento', amount: 1000, percentage: 0 }],
+      allocationBreakdown: [{ label: 'Materiais', amount: 400, percentage: 0, description: '' }],
+    },
+    [],
+    [
+      {
+        id: 'p1',
+        protocol: 'PIX-1',
+        donorName: 'Doador',
+        amount: 250,
+        purpose: 'Apoio',
+        date: '2026',
+        status: 'confirmado',
+      },
+    ]
+  );
+  if (check.socioTorcedoresTotal !== 3 || check.totalRevenue !== 1250 || check.totalInvested !== 400) {
+    throw new Error('computeTransparencyDashboard self-check failed');
+  }
+}
+
 export type EventCategory = 'clinica_esportiva' | 'oficina_comunitaria' | 'reuniao_associacao';
 
 export interface VitalizarEvent {
@@ -389,6 +706,71 @@ export interface VitalizarEvent {
   scheduleHighlights?: string[];
   status: 'confirmado' | 'inscricoes_abertas' | 'vagas_limitadas' | 'em_breve';
   attachments?: AttachedFile[];
+}
+
+export function syncEventSpots(
+  event: VitalizarEvent,
+  rsvps: { eventId?: string; spots?: number; enrollmentStatus?: string }[]
+): VitalizarEvent {
+  const capacity = Math.max(1, Number(event.capacity) || 30);
+  const occupied = (rsvps || [])
+    .filter((r) => r && r.eventId === event.id && r.enrollmentStatus !== 'recusada')
+    .reduce((sum, r) => sum + Math.max(1, Math.floor(Number(r.spots)) || 1), 0);
+  const availableSpots = Math.max(0, capacity - occupied);
+  const status: VitalizarEvent['status'] =
+    event.status === 'confirmado' || event.status === 'em_breve'
+      ? event.status
+      : availableSpots === 0
+      ? 'em_breve'
+      : availableSpots <= 5
+      ? 'vagas_limitadas'
+      : 'inscricoes_abertas';
+  return {
+    ...event,
+    capacity,
+    availableSpots,
+    status,
+  };
+}
+
+export function syncEventsWithRsvps(
+  events: VitalizarEvent[],
+  rsvps: { eventId?: string; spots?: number; enrollmentStatus?: string }[]
+): VitalizarEvent[] {
+  return (events || []).map((ev) => syncEventSpots(ev, rsvps));
+}
+
+// Self-check for event spot calculation
+{
+  const sample = syncEventSpots(
+    {
+      id: 'evt-check',
+      title: 'Teste',
+      category: 'clinica_esportiva',
+      categoryLabel: 'Clínica Esportiva',
+      date: '2026-10-24',
+      formattedDate: '24/10/2026',
+      dayNumber: '24',
+      monthShort: 'OUT',
+      time: '08:00',
+      location: 'Polo',
+      address: 'Rua',
+      targetAudience: 'Todos',
+      coordinator: 'Coord',
+      capacity: 40,
+      availableSpots: 14,
+      isFree: true,
+      description: '',
+      status: 'inscricoes_abertas',
+    },
+    [
+      { eventId: 'evt-check', spots: 3 },
+      { eventId: 'evt-check', spots: 2, enrollmentStatus: 'recusada' },
+    ]
+  );
+  if (sample.availableSpots !== 37) {
+    throw new Error(`syncEventSpots self-check failed: expected 37, got ${sample.availableSpots}`);
+  }
 }
 
 export type SponsorTier = 'master' | 'ouro' | 'prata' | 'bronze' | 'apoio';

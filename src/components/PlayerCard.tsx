@@ -11,7 +11,10 @@ import {
   Ruler,
   Weight,
 } from 'lucide-react';
-import { ProjectParticipant } from '../types/index.ts';
+import {
+  ProjectParticipant,
+  getParticipantModalityProfile,
+} from '../types/index.ts';
 
 interface PlayerCardProps {
   participant: ProjectParticipant;
@@ -29,6 +32,10 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
   onOpenScout,
 }) => {
   const { stats, cardTier } = participant;
+  const modalityProfile = getParticipantModalityProfile(
+    participant.modality,
+    participant.modalityOrClass
+  );
 
   // Visual theming based on card tier
   const getTierTheme = () => {
@@ -94,14 +101,21 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
   const theme = getTierTheme();
 
   const getPositionAbbr = (pos: string) => {
-    const lower = pos.toLowerCase();
+    const lower = (pos || '').toLowerCase();
+    if (lower.includes('ponteir')) return 'PON';
+    if (lower.includes('levantador')) return 'LEV';
+    if (lower.includes('central')) return 'CEN';
+    if (lower.includes('opost')) return 'OPO';
+    if (lower.includes('líbero') || lower.includes('libero')) return 'LIB';
+    if (lower.includes('fixo')) return 'FIX';
+    if (lower.includes('pivô') || lower.includes('pivo')) return 'PIV';
+    if (lower.includes('ala') || lower.includes('ponta')) return 'ALA';
+    if (lower.includes('goleir')) return 'GOL';
     if (lower.includes('centroavante') || lower.includes('atacante')) return 'ATA';
     if (lower.includes('meia') || lower.includes('armador')) return 'MEI';
     if (lower.includes('volante')) return 'VOL';
-    if (lower.includes('goleiro')) return 'GOL';
     if (lower.includes('zagueiro')) return 'ZAG';
     if (lower.includes('lateral')) return 'LAT';
-    if (lower.includes('ponta') || lower.includes('ala')) return 'ALA';
     return pos.slice(0, 3).toUpperCase();
   };
 
@@ -148,8 +162,11 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
           )}
         </div>
 
-        {/* Tier Label & Jersey Number */}
-        <div className="flex items-center gap-2">
+        {/* Modality, Category & Jersey Number */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-extrabold uppercase tracking-wider text-sky-300 bg-sky-950/80 px-2 py-0.5 rounded-full border border-sky-400/30">
+            {modalityProfile.modalityName}
+          </span>
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-300 bg-white/10 px-2 py-0.5 rounded-full border border-white/15">
             {participant.category}
           </span>
@@ -181,10 +198,12 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
             </div>
           )}
 
-          {/* Preferred Foot Pill */}
+          {/* Dominance Pill (Mão Dominante for Voleibol / Pé Dominante for Futsal) */}
           <div className="absolute bottom-1 left-2 text-[10px] font-semibold text-slate-300 flex items-center gap-1">
             <Footprints className="w-2.5 h-2.5 text-sky-400" />
-            <span>{participant.preferredFoot}</span>
+            <span>
+              {modalityProfile.dominanceShortLabel}: {participant.preferredFoot}
+            </span>
           </div>
         </div>
 
@@ -196,37 +215,58 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
           <p className="text-[11px] font-medium text-slate-400 truncate">
             {participant.name}
           </p>
-          <p className="text-[11px] font-semibold text-sky-300 mt-0.5">
-            {participant.position}
+          <p className="text-[11px] font-semibold text-sky-300 mt-0.5 truncate">
+            {participant.position} · {modalityProfile.modalityName}
           </p>
         </div>
       </div>
 
-      {/* Core Attributes Hexagon / 6 FIFA-style Stats Grid */}
+      {/* Core Attributes Hexagon / 6 Modality-Aware Stats Grid */}
       <div className="relative z-10 bg-slate-950/80 rounded-xl border border-white/10 p-2.5 shadow-inner backdrop-blur-xs">
         <div className="grid grid-cols-3 gap-y-1.5 gap-x-2 text-center text-xs">
-          <div className="flex flex-col items-center">
-            <span className="text-[10px] uppercase font-bold text-slate-400">VEL</span>
+          <div className="flex flex-col items-center" title={modalityProfile.statLabels.pace.full}>
+            <span className="text-[10px] uppercase font-bold text-slate-400">
+              {modalityProfile.statLabels.pace.short}
+            </span>
             <span className="font-extrabold text-white text-sm">{stats.pace}</span>
           </div>
-          <div className="flex flex-col items-center">
-            <span className="text-[10px] uppercase font-bold text-slate-400">FIN</span>
+          <div className="flex flex-col items-center" title={modalityProfile.statLabels.shooting.full}>
+            <span className="text-[10px] uppercase font-bold text-slate-400">
+              {modalityProfile.statLabels.shooting.short}
+            </span>
             <span className="font-extrabold text-white text-sm">{stats.shooting}</span>
           </div>
-          <div className="flex flex-col items-center">
-            <span className="text-[10px] uppercase font-bold text-slate-400">PAS</span>
+          <div className="flex flex-col items-center" title={modalityProfile.statLabels.passing.full}>
+            <span className="text-[10px] uppercase font-bold text-slate-400">
+              {modalityProfile.statLabels.passing.short}
+            </span>
             <span className="font-extrabold text-white text-sm">{stats.passing}</span>
           </div>
-          <div className="flex flex-col items-center border-t border-white/5 pt-1">
-            <span className="text-[10px] uppercase font-bold text-slate-400">DRI</span>
+          <div
+            className="flex flex-col items-center border-t border-white/5 pt-1"
+            title={modalityProfile.statLabels.dribbling.full}
+          >
+            <span className="text-[10px] uppercase font-bold text-slate-400">
+              {modalityProfile.statLabels.dribbling.short}
+            </span>
             <span className="font-extrabold text-white text-sm">{stats.dribbling}</span>
           </div>
-          <div className="flex flex-col items-center border-t border-white/5 pt-1">
-            <span className="text-[10px] uppercase font-bold text-slate-400">DEF</span>
+          <div
+            className="flex flex-col items-center border-t border-white/5 pt-1"
+            title={modalityProfile.statLabels.defending.full}
+          >
+            <span className="text-[10px] uppercase font-bold text-slate-400">
+              {modalityProfile.statLabels.defending.short}
+            </span>
             <span className="font-extrabold text-white text-sm">{stats.defending}</span>
           </div>
-          <div className="flex flex-col items-center border-t border-white/5 pt-1">
-            <span className="text-[10px] uppercase font-bold text-slate-400">FIS</span>
+          <div
+            className="flex flex-col items-center border-t border-white/5 pt-1"
+            title={modalityProfile.statLabels.physical.full}
+          >
+            <span className="text-[10px] uppercase font-bold text-slate-400">
+              {modalityProfile.statLabels.physical.short}
+            </span>
             <span className="font-extrabold text-white text-sm">{stats.physical}</span>
           </div>
         </div>
@@ -245,7 +285,9 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
         </div>
 
         <div className="flex items-center justify-between text-[11px] text-slate-300">
-          <span className="text-slate-400">Categoria / Pé:</span>
+          <span className="text-slate-400">
+            Categoria / {modalityProfile.dominanceShortLabel}:
+          </span>
           <span className="font-semibold text-white">
             {participant.category} · {participant.preferredFoot}
           </span>

@@ -24,7 +24,12 @@ import type {
   FacilityPolo,
   TransparencyDocument,
 } from '../../types/index.ts';
-import { syncProjectSpotsAndTeams } from '../../types/index.ts';
+import {
+  syncProjectSpotsAndTeams,
+  syncEventSpots,
+  computeTransparencyDashboard,
+} from '../../types/index.ts';
+import { DEFAULT_SITE_SETTINGS } from '../../data/clubeData.ts';
 import {
   CampoTexto,
   CampoUploadImagem,
@@ -74,6 +79,8 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
     projects,
     newsArticles,
     events,
+    rsvps,
+    addRsvp,
     galleryAlbums,
     sponsors,
     facilityPolos,
@@ -141,6 +148,13 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
       linkLabel: 'Saiba mais',
       linkTarget: 'projetos',
     }
+  );
+  const [newEvtRsvpName, setNewEvtRsvpName] = useState('');
+  const [newEvtRsvpPhone, setNewEvtRsvpPhone] = useState('');
+  const [newEvtRsvpSpots, setNewEvtRsvpSpots] = useState('1');
+  const [dashEditorOpen, setDashEditorOpen] = useState(false);
+  const [draftDash, setDraftDash] = useState(
+    () => siteSettings.transparencyDashboard || DEFAULT_SITE_SETTINGS.transparencyDashboard!
   );
 
   const triggerSavedIndicator = () => {
@@ -1000,8 +1014,11 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
     );
 
     const openEditEvent = (ev?: VitalizarEvent) => {
+      setNewEvtRsvpName('');
+      setNewEvtRsvpPhone('');
+      setNewEvtRsvpSpots('1');
       if (ev) {
-        setDraftEvent({ ...ev });
+        setDraftEvent(syncEventSpots({ ...ev }, rsvps));
       } else {
         const today = new Date().toISOString().slice(0, 10);
         setDraftEvent({
@@ -1032,20 +1049,61 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
       e.preventDefault();
       if (!draftEvent || isReadOnly) return;
       setSaveState('saving');
-      const exists = events.some((ev) => ev.id === draftEvent.id);
+      const syncedDraft = syncEventSpots(draftEvent, rsvps);
+      const exists = events.some((ev) => ev.id === syncedDraft.id);
       const next = exists
-        ? events.map((ev) => (ev.id === draftEvent.id ? draftEvent : ev))
-        : [draftEvent, ...events];
-      saveAdminChanges({ events: next }, `Evento salvo: ${draftEvent.title}`);
+        ? events.map((ev) => (ev.id === syncedDraft.id ? syncedDraft : ev))
+        : [syncedDraft, ...events];
+      saveAdminChanges({ events: next }, `Evento salvo: ${syncedDraft.title}`);
       recordAuditEvent({
         action: exists ? 'update_event' : 'create_event',
         collection: 'events',
-        itemId: draftEvent.id,
-        afterSummary: draftEvent.title,
+        itemId: syncedDraft.id,
+        afterSummary: syncedDraft.title,
         role,
       });
       triggerSavedIndicator();
       setDrawerOpen(false);
+    };
+
+    const draftEventRsvps = draftEvent
+      ? rsvps.filter((r) => r.eventId === draftEvent.id && r.enrollmentStatus !== 'recusada')
+      : [];
+    const draftOccupiedSpots = draftEventRsvps.reduce(
+      (sum, r) => sum + Math.max(1, Math.floor(Number(r.spots)) || 1),
+      0
+    );
+
+    const handleAddParticipantToEvent = () => {
+      if (!draftEvent || !newEvtRsvpName.trim() || !newEvtRsvpPhone.trim()) return;
+      const spotsCount = Math.max(1, Math.min(10, Math.floor(Number(newEvtRsvpSpots)) || 1));
+      addRsvp({
+        eventId: draftEvent.id,
+        eventTitle: draftEvent.title || 'Evento Vitalizar',
+        name: newEvtRsvpName.trim(),
+        phone: newEvtRsvpPhone.trim(),
+        spots: spotsCount,
+      });
+      const nextOccupied = draftOccupiedSpots + spotsCount;
+      setDraftEvent({
+        ...draftEvent,
+        availableSpots: Math.max(0, (draftEvent.capacity || 30) - nextOccupied),
+      });
+      setNewEvtRsvpName('');
+      setNewEvtRsvpPhone('');
+      setNewEvtRsvpSpots('1');
+    };
+
+    const handleRemoveEventRsvp = (rsvpId: string, participantName: string) => {
+      if (!draftEvent || isReadOnly) return;
+      const nextRsvps = rsvps.filter((r) => r.id !== rsvpId);
+      const nextDraft = syncEventSpots(draftEvent, nextRsvps);
+      setDraftEvent(nextDraft);
+      const nextEvents = events.map((ev) => (ev.id === nextDraft.id ? nextDraft : ev));
+      saveAdminChanges(
+        { rsvps: nextRsvps, events: nextEvents },
+        `Inscrição de "${participantName}" removida do evento "${draftEvent.title}".`
+      );
     };
 
     const columns: ColunaTabela<VitalizarEvent>[] = [
@@ -1072,13 +1130,22 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
       },
       {
         id: 'capacity',
-        header: 'Vagas Livres / Total',
+        header: 'Ocupação (Inscritos / Capacidade)',
         align: 'right',
-        render: (ev) => (
-          <span className="font-mono text-xs">
-            {ev.availableSpots ?? ev.capacity} / {ev.capacity || 50}
-          </span>
-        ),
+        render: (ev) => {
+          const synced = syncEventSpots(ev, rsvps);
+          const filled = Math.max(0, synced.capacity - synced.availableSpots);
+          return (
+            <div className="text-right font-mono text-xs">
+              <span className="font-bold text-slate-900 dark:text-slate-100">
+                {filled} / {synced.capacity}
+              </span>
+              <span className="block text-[10px] text-emerald-600 dark:text-emerald-400">
+                {synced.availableSpots} livres
+              </span>
+            </div>
+          );
+        },
       },
       {
         id: 'actions',
@@ -1090,6 +1157,7 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
               type="button"
               onClick={() => openEditEvent(ev)}
               className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              title="Editar evento e gerenciar inscritos"
             >
               <Edit3 className="w-3.5 h-3.5" />
             </button>
@@ -1132,7 +1200,7 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
               Agenda de Eventos e Clínicas
             </h2>
             <p className="text-xs text-slate-500">
-              Calendário oficial de festivais esportivos, reuniões e oficinas comunitárias.
+              As vagas preenchidas são calculadas automaticamente a partir das confirmações de presença (RSVPs) de cada evento.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -1166,7 +1234,7 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
         <PainelLateral
           isOpen={drawerOpen && !!draftEvent}
           onClose={() => setDrawerOpen(false)}
-          title="Editar Evento"
+          title="Editar Evento & Participantes"
           subtitle={draftEvent?.title}
           saveState={saveState}
           onSave={!isReadOnly ? handleSaveEvent : undefined}
@@ -1205,26 +1273,112 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                   type="number"
                   value={String(draftEvent.capacity ?? 60)}
                   onChange={(v) => {
-                    const cap = Math.max(0, Number(v) || 0);
+                    const cap = Math.max(1, Number(v) || 1);
                     setDraftEvent({
                       ...draftEvent,
                       capacity: cap,
-                      availableSpots: Math.min(draftEvent.availableSpots ?? cap, cap),
+                      availableSpots: Math.max(0, cap - draftOccupiedSpots),
                     });
                   }}
                 />
-                <CampoTexto
-                  label="Vagas Disponíveis"
-                  type="number"
-                  value={String(draftEvent.availableSpots ?? draftEvent.capacity ?? 60)}
-                  onChange={(v) =>
-                    setDraftEvent({
-                      ...draftEvent,
-                      availableSpots: Math.max(0, Number(v) || 0),
-                    })
-                  }
-                />
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Ocupação Real (Automática)
+                  </label>
+                  <div className="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 font-mono text-slate-800 dark:text-slate-200">
+                    {draftOccupiedSpots} preenchida(s) ·{' '}
+                    <strong className="text-emerald-600 dark:text-emerald-400">
+                      {Math.max(0, (draftEvent.capacity || 60) - draftOccupiedSpots)} livre(s)
+                    </strong>
+                  </div>
+                </div>
               </div>
+
+              {/* Participantes Confirmados neste Evento */}
+              <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-3 bg-slate-50/60 dark:bg-slate-800/40">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                    Inscritos Confirmados ({draftEventRsvps.length} registro(s) · {draftOccupiedSpots} vaga(s))
+                  </h4>
+                </div>
+
+                {draftEventRsvps.length === 0 ? (
+                  <p className="text-[11px] text-slate-500">
+                    Nenhuma inscrição registrada para este evento. Todas as {draftEvent.capacity} vagas estão disponíveis.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                    {draftEventRsvps.map((r) => (
+                      <div
+                        key={r.id}
+                        className="flex items-center justify-between gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <span className="font-bold text-slate-900 dark:text-slate-100 block truncate">
+                            {r.name} ({r.spots || 1} vaga{(r.spots || 1) > 1 ? 's' : ''})
+                          </span>
+                          <span className="font-mono text-[10px] text-slate-500">
+                            {r.confirmationCode} · {r.phone}
+                          </span>
+                        </div>
+                        {!isReadOnly && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveEventRsvp(r.id, r.name)}
+                            className="p-1 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded cursor-pointer shrink-0"
+                            title="Cancelar inscrição e liberar vaga"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {!isReadOnly && (
+                  <div className="pt-2 border-t border-slate-200 dark:border-slate-700 space-y-2">
+                    <span className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                      Adicionar Participante Manualmente
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Nome do participante"
+                        value={newEvtRsvpName}
+                        onChange={(e) => setNewEvtRsvpName(e.target.value)}
+                        className="sm:col-span-2 px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                      />
+                      <input
+                        type="tel"
+                        placeholder="WhatsApp"
+                        value={newEvtRsvpPhone}
+                        onChange={(e) => setNewEvtRsvpPhone(e.target.value)}
+                        className="sm:col-span-2 px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                      />
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={newEvtRsvpSpots}
+                          onChange={(e) => setNewEvtRsvpSpots(e.target.value)}
+                          className="w-12 px-2 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                          title="Quantidade de vagas"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddParticipantToEvent}
+                          className="px-2.5 py-1.5 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-bold rounded-lg cursor-pointer shrink-0"
+                        >
+                          + Incluir
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <CampoTexto
                 label="Descrição"
                 multiline
@@ -2192,26 +2346,10 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
         if (!rawText) return;
         const parsed = parseTransparencyFinancialCsv(rawText);
         if (parsed.error) return;
-        const currentDash = siteSettings.transparencyDashboard || {
-          socioTorcedoresTotal: 140,
-          socioTorcedoresGoal: 200,
-          socioTorcedoresNewMonth: 12,
-          socioTorcedoresRetentionRate: '94%',
-          socioTorcedoresTiers: [],
-          socioTorcedoresMonthlyGrowth: [],
-          fiscalYear: String(new Date().getFullYear()),
-          totalRevenue: parsed.totalRevenue,
-          totalInvested: parsed.totalInvested,
-          directBeneficiaries: 320,
-          auditStatus: 'Regular / Aprovado pelo Conselho Fiscal',
-          lastAuditDate: new Date().toLocaleDateString('pt-BR'),
-          allocationBreakdown: [],
-          revenueSources: [],
-        };
-        const nextDashboard = {
+        const currentDash =
+          siteSettings.transparencyDashboard || DEFAULT_SITE_SETTINGS.transparencyDashboard!;
+        const mergedRaw = {
           ...currentDash,
-          totalRevenue: parsed.totalRevenue || currentDash.totalRevenue,
-          totalInvested: parsed.totalInvested || currentDash.totalInvested,
           lastAuditDate: new Date().toLocaleDateString('pt-BR'),
           allocationBreakdown:
             parsed.allocationBreakdown.length > 0
@@ -2222,6 +2360,21 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
               ? parsed.revenueSources
               : currentDash.revenueSources,
         };
+        const synced = computeTransparencyDashboard(
+          mergedRaw,
+          projects,
+          siteSettings.donationPledges || []
+        );
+        const nextDashboard = {
+          ...mergedRaw,
+          totalRevenue: synced.totalRevenue,
+          totalInvested: synced.totalInvested,
+          socioTorcedoresTotal: synced.socioTorcedoresTotal,
+          directBeneficiaries: synced.directBeneficiaries,
+          allocationBreakdown: synced.allocationBreakdown,
+          revenueSources: mergedRaw.revenueSources,
+        };
+        setDraftDash(nextDashboard);
         saveAdminChanges(
           {
             siteSettings: {
@@ -2229,17 +2382,62 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
               transparencyDashboard: nextDashboard,
             },
           },
-          `Gráficos financeiros do Portal da Transparência atualizados via planilha (${file.name})!`
+          `Fontes de receita e rubricas atualizadas via planilha (${file.name})!`
         );
         recordAuditEvent({
           action: 'import_financial_csv',
           collection: 'site_settings',
           itemId: file.name,
-          afterSummary: `Receita R$ ${parsed.totalRevenue} | Investido R$ ${parsed.totalInvested}`,
+          afterSummary: `Receita R$ ${synced.totalRevenue} | Investido R$ ${synced.totalInvested}`,
           role,
         });
       };
       reader.readAsText(file, 'UTF-8');
+    };
+
+    const computedLiveDash = computeTransparencyDashboard(
+      siteSettings.transparencyDashboard,
+      projects,
+      siteSettings.donationPledges || []
+    );
+    const computedDraftDash = computeTransparencyDashboard(
+      draftDash,
+      projects,
+      siteSettings.donationPledges || []
+    );
+
+    const handleSaveTransparencyIndicators = () => {
+      if (isReadOnly) return;
+      const cleanRevenueSources = (draftDash.revenueSources || []).filter(
+        (r) => !r.label.toLowerCase().includes('pix confirmad')
+      );
+      const nextDashboard = {
+        ...draftDash,
+        revenueSources: cleanRevenueSources,
+        allocationBreakdown: computedDraftDash.allocationBreakdown,
+        socioTorcedoresTiers: computedDraftDash.socioTorcedoresTiers,
+        totalRevenue: computedDraftDash.totalRevenue,
+        totalInvested: computedDraftDash.totalInvested,
+        socioTorcedoresTotal: computedDraftDash.socioTorcedoresTotal,
+        directBeneficiaries: computedDraftDash.directBeneficiaries,
+      };
+      saveAdminChanges(
+        {
+          siteSettings: {
+            ...siteSettings,
+            transparencyDashboard: nextDashboard,
+          },
+        },
+        'Fontes financeiras e quadros do Portal da Transparência salvos e recalculados!'
+      );
+      recordAuditEvent({
+        action: 'update_transparency_indicators',
+        collection: 'site_settings',
+        itemId: 'transparencyDashboard',
+        afterSummary: `Exercício ${nextDashboard.fiscalYear} | Receita R$ ${nextDashboard.totalRevenue} | Investido R$ ${nextDashboard.totalInvested} | Vagas ${nextDashboard.directBeneficiaries}`,
+        role,
+      });
+      setDashEditorOpen(false);
     };
 
     return (
@@ -2252,11 +2450,24 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
             <p className="text-xs text-slate-500">
               {isReadOnly
                 ? 'Modo de leitura e conferência fiscal habilitado para seu perfil.'
-                : 'Envie certidões (PDF), balancetes ou importe a planilha financeira para alimentar os gráficos.'}
+                : 'Todos os totais são calculados automaticamente a partir das fontes reais abaixo, vagas dos projetos e doações PIX confirmadas.'}
             </p>
           </div>
           {!isReadOnly && (
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDraftDash(
+                    siteSettings.transparencyDashboard || DEFAULT_SITE_SETTINGS.transparencyDashboard!
+                  );
+                  setDashEditorOpen((prev) => !prev);
+                }}
+                className="px-3 py-1.5 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>{dashEditorOpen ? 'Fechar Fontes & Rubricas' : 'Gerenciar Fontes, Rubricas & Sócios'}</span>
+              </button>
               <button
                 type="button"
                 onClick={() =>
@@ -2303,6 +2514,367 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
             </div>
           )}
         </div>
+
+        {/* Resumo automático auditável (sempre visível) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+              Sócios & Apoiadores (Automático)
+            </span>
+            <p className="text-lg font-extrabold text-slate-900 dark:text-slate-100 mt-0.5">
+              {computedLiveDash.socioTorcedoresTotal}{' '}
+              <span className="text-xs font-medium text-slate-400">
+                / meta {computedLiveDash.socioTorcedoresGoal}
+              </span>
+            </p>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Fonte: Planos de Sócio ({computedLiveDash.socioTorcedoresTiers.reduce((a, t) => a + t.count, 0)}) + PIX Confirmados ({computedLiveDash.confirmedPixCount})
+            </p>
+          </div>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+              Receita Captada (Automático)
+            </span>
+            <p className="text-lg font-extrabold text-slate-900 dark:text-slate-100 mt-0.5">
+              R$ {computedLiveDash.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Fonte: Soma das Fontes de Receita + R$ {computedLiveDash.confirmedPixAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} em PIX
+            </p>
+          </div>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+              Investido em Projetos (Automático)
+            </span>
+            <p className="text-lg font-extrabold text-slate-900 dark:text-slate-100 mt-0.5">
+              R$ {computedLiveDash.totalInvested.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Fonte: Soma das {computedLiveDash.allocationBreakdown.length} rubricas de despesa
+            </p>
+          </div>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+              Vagas & Beneficiários (Automático)
+            </span>
+            <p className="text-lg font-extrabold text-slate-900 dark:text-slate-100 mt-0.5">
+              {computedLiveDash.directBeneficiaries} Vagas{' '}
+              <span className="text-xs font-semibold text-emerald-600">
+                ({computedLiveDash.activeParticipantsCount} matriculados)
+              </span>
+            </p>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Fonte: Soma das turmas/times em Conteúdo → Projetos
+            </p>
+          </div>
+        </div>
+
+        {dashEditorOpen && !isReadOnly && (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  Gestão de Fontes Financeiras, Rubricas e Quadro de Sócios
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Nenhum total é fixo: edite os lançamentos de cada tabela abaixo e os indicadores e percentuais serão calculados automaticamente.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveTransparencyIndicators}
+                className="px-3 py-1.5 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Salvar Alterações</span>
+              </button>
+            </div>
+
+            {/* 1. Parâmetros de Auditoria e Metas */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <CampoTexto
+                label="Ano Fiscal"
+                value={draftDash.fiscalYear}
+                onChange={(v) => setDraftDash({ ...draftDash, fiscalYear: v })}
+              />
+              <CampoTexto
+                label="Meta Anual de Sócios/Apoiadores"
+                type="number"
+                value={String(draftDash.socioTorcedoresGoal)}
+                onChange={(v) =>
+                  setDraftDash({ ...draftDash, socioTorcedoresGoal: Math.max(1, Number(v) || 1) })
+                }
+              />
+              <CampoTexto
+                label="Data da Última Atualização/Auditoria"
+                value={draftDash.lastAuditDate}
+                onChange={(v) => setDraftDash({ ...draftDash, lastAuditDate: v })}
+              />
+              <CampoTexto
+                label="Parecer do Conselho Fiscal / Status"
+                value={draftDash.auditStatus}
+                onChange={(v) => setDraftDash({ ...draftDash, auditStatus: v })}
+              />
+            </div>
+
+            {/* 2. Planos de Sócio-Torcedor */}
+            <div className="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                    1. Quadro de Sócio-Torcedor por Plano (Total automático: {computedDraftDash.socioTorcedoresTotal})
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Soma dos planos abaixo ({computedDraftDash.socioTorcedoresTiers.reduce((a, t) => a + t.count, 0)}) + Doações PIX confirmadas em Doações & Contatos ({computedDraftDash.confirmedPixCount}).
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {(draftDash.socioTorcedoresTiers || []).map((tier, idx) => (
+                  <div
+                    key={tier.id || idx}
+                    className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                        {tier.name}
+                      </span>
+                      <span className="text-[11px] font-semibold text-slate-500">
+                        {tier.monthlyContribution}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <CampoTexto
+                        label="Sócios Ativos"
+                        type="number"
+                        value={String(tier.count)}
+                        onChange={(v) => {
+                          const nextTiers = [...(draftDash.socioTorcedoresTiers || [])];
+                          nextTiers[idx] = {
+                            ...nextTiers[idx],
+                            count: Math.max(0, Number(v) || 0),
+                          };
+                          setDraftDash({ ...draftDash, socioTorcedoresTiers: nextTiers });
+                        }}
+                      />
+                      <CampoTexto
+                        label="Contribuição Mensal"
+                        value={tier.monthlyContribution}
+                        onChange={(v) => {
+                          const nextTiers = [...(draftDash.socioTorcedoresTiers || [])];
+                          nextTiers[idx] = {
+                            ...nextTiers[idx],
+                            monthlyContribution: v,
+                          };
+                          setDraftDash({ ...draftDash, socioTorcedoresTiers: nextTiers });
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 3. Fontes de Receita */}
+            <div className="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                    2. Fontes de Receita Captada (Total automático: R${' '}
+                    {computedDraftDash.totalRevenue.toLocaleString('pt-BR', {
+                      minimumFractionDigits: 2,
+                    })})
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    As doações PIX confirmadas (R$ {computedDraftDash.confirmedPixAmount.toFixed(2)}) são somadas automaticamente ao total.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDraftDash({
+                      ...draftDash,
+                      revenueSources: [
+                        ...(draftDash.revenueSources || []),
+                        { label: 'Nova Fonte de Receita', amount: 0, percentage: 0 },
+                      ],
+                    })
+                  }
+                  className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Adicionar Fonte</span>
+                </button>
+              </div>
+              <div className="space-y-2">
+                {(draftDash.revenueSources || [])
+                  .filter((r) => !r.label.toLowerCase().includes('pix confirmad'))
+                  .map((src, idx) => (
+                    <div
+                      key={idx}
+                      className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/30"
+                    >
+                      <div className="sm:col-span-7">
+                        <CampoTexto
+                          label="Fonte de Receita"
+                          value={src.label}
+                          onChange={(v) => {
+                            const filtered = (draftDash.revenueSources || []).filter(
+                              (r) => !r.label.toLowerCase().includes('pix confirmad')
+                            );
+                            filtered[idx] = { ...filtered[idx], label: v };
+                            setDraftDash({ ...draftDash, revenueSources: filtered });
+                          }}
+                        />
+                      </div>
+                      <div className="sm:col-span-4">
+                        <CampoTexto
+                          label="Valor Captado (R$)"
+                          type="number"
+                          value={String(src.amount)}
+                          onChange={(v) => {
+                            const filtered = (draftDash.revenueSources || []).filter(
+                              (r) => !r.label.toLowerCase().includes('pix confirmad')
+                            );
+                            filtered[idx] = {
+                              ...filtered[idx],
+                              amount: Math.max(0, Number(v) || 0),
+                            };
+                            setDraftDash({ ...draftDash, revenueSources: filtered });
+                          }}
+                        />
+                      </div>
+                      <div className="sm:col-span-1 flex justify-end pb-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const filtered = (draftDash.revenueSources || []).filter(
+                              (r) => !r.label.toLowerCase().includes('pix confirmad')
+                            );
+                            setDraftDash({
+                              ...draftDash,
+                              revenueSources: filtered.filter((_, i) => i !== idx),
+                            });
+                          }}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg cursor-pointer"
+                          title="Remover fonte"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                <div className="p-2.5 rounded-lg border border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20 flex items-center justify-between text-xs">
+                  <span className="font-semibold text-emerald-900 dark:text-emerald-200">
+                    Doações PIX Confirmadas (sincronizado da aba Doações & Contatos · {computedDraftDash.confirmedPixCount} confirmações)
+                  </span>
+                  <span className="font-extrabold text-emerald-700 dark:text-emerald-300">
+                    R$ {computedDraftDash.confirmedPixAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Rubricas de Destinação / Despesas */}
+            <div className="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                    3. Rubricas de Destinação / Recursos Investidos (Total automático: R${' '}
+                    {computedDraftDash.totalInvested.toLocaleString('pt-BR', {
+                      minimumFractionDigits: 2,
+                    })})
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    O percentual de cada eixo é calculado automaticamente sobre a soma total investida.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDraftDash({
+                      ...draftDash,
+                      allocationBreakdown: [
+                        ...(draftDash.allocationBreakdown || []),
+                        {
+                          label: 'Nova Rubrica de Despesa',
+                          description: 'Descrição da aplicação dos recursos',
+                          amount: 0,
+                          percentage: 0,
+                        },
+                      ],
+                    })
+                  }
+                  className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Adicionar Rubrica</span>
+                </button>
+              </div>
+              <div className="space-y-2">
+                {(draftDash.allocationBreakdown || []).map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/30"
+                  >
+                    <div className="sm:col-span-4">
+                      <CampoTexto
+                        label="Rubrica / Eixo"
+                        value={item.label}
+                        onChange={(v) => {
+                          const next = [...(draftDash.allocationBreakdown || [])];
+                          next[idx] = { ...next[idx], label: v };
+                          setDraftDash({ ...draftDash, allocationBreakdown: next });
+                        }}
+                      />
+                    </div>
+                    <div className="sm:col-span-4">
+                      <CampoTexto
+                        label="Descrição"
+                        value={item.description}
+                        onChange={(v) => {
+                          const next = [...(draftDash.allocationBreakdown || [])];
+                          next[idx] = { ...next[idx], description: v };
+                          setDraftDash({ ...draftDash, allocationBreakdown: next });
+                        }}
+                      />
+                    </div>
+                    <div className="sm:col-span-3">
+                      <CampoTexto
+                        label="Valor Executado (R$)"
+                        type="number"
+                        value={String(item.amount)}
+                        onChange={(v) => {
+                          const next = [...(draftDash.allocationBreakdown || [])];
+                          next[idx] = {
+                            ...next[idx],
+                            amount: Math.max(0, Number(v) || 0),
+                          };
+                          setDraftDash({ ...draftDash, allocationBreakdown: next });
+                        }}
+                      />
+                    </div>
+                    <div className="sm:col-span-1 flex justify-end pb-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = (draftDash.allocationBreakdown || []).filter(
+                            (_, i) => i !== idx
+                          );
+                          setDraftDash({ ...draftDash, allocationBreakdown: next });
+                        }}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg cursor-pointer"
+                        title="Remover rubrica"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         <Tabela
           items={transparencyDocs}

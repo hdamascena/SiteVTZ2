@@ -246,19 +246,87 @@ export async function insertCollectionRecordIfNew(
   }
 }
 
-// One atomic UPDATE, so two visitors booking at the same moment both count
-export async function takeEventSpots(eventId: string, spots: number) {
+// Recalculate availableSpots from real confirmed rsvps in collection_items
+export async function takeEventSpots(eventId: string, _spots: number) {
   await db.execute(sql`
-    UPDATE collection_items
+    UPDATE collection_items e
     SET payload = jsonb_set(
-      payload,
+      e.payload,
       '{availableSpots}',
-      to_jsonb(GREATEST(0, (payload->>'availableSpots')::numeric - ${spots}))
+      to_jsonb(
+        GREATEST(
+          0,
+          COALESCE((e.payload->>'capacity')::numeric, 30) - COALESCE((
+            SELECT SUM(GREATEST(1, COALESCE((r.payload->>'spots')::numeric, 1)))
+            FROM collection_items r
+            WHERE r.collection_name = 'rsvps'
+              AND r.payload->>'eventId' = e.item_id
+              AND COALESCE(r.payload->>'enrollmentStatus', 'pendente') <> 'recusada'
+          ), 0)
+        )
+      )
     ),
     updated_at = now()
-    WHERE id = ${`events:${eventId}`}
-      AND jsonb_typeof(payload->'availableSpots') = 'number'
+    WHERE e.id = ${`events:${eventId}`}
   `);
+}
+
+export async function attachLiveEventSpots(collections: Record<string, unknown[]>) {
+  try {
+    if (Array.isArray(collections.events) && collections.events.length > 0) {
+      const rsvpRows = await db
+        .select({ payload: collectionItems.payload })
+        .from(collectionItems)
+        .where(eq(collectionItems.collectionName, 'rsvps'));
+      const occupiedByEvent = new Map<string, number>();
+      for (const row of rsvpRows) {
+        const p = row.payload as Record<string, any> | null;
+        if (!p || typeof p.eventId !== 'string' || p.enrollmentStatus === 'recusada') continue;
+        const spots = Math.max(1, Math.floor(Number(p.spots)) || 1);
+        occupiedByEvent.set(p.eventId, (occupiedByEvent.get(p.eventId) || 0) + spots);
+      }
+      collections.events = collections.events.map((rawEv) => {
+        if (!rawEv || typeof rawEv !== 'object') return rawEv;
+        const ev = rawEv as Record<string, any>;
+        const cap = Math.max(1, Number(ev.capacity) || 30);
+        const occupied = occupiedByEvent.get(String(ev.id || '')) || 0;
+        const availableSpots = Math.max(0, cap - occupied);
+        return {
+          ...ev,
+          capacity: cap,
+          availableSpots,
+        };
+      });
+    }
+
+    if (Array.isArray(collections.site_settings) && collections.site_settings.length > 0) {
+      const pledgeRows = await db
+        .select({ payload: collectionItems.payload })
+        .from(collectionItems)
+        .where(eq(collectionItems.collectionName, 'donation_pledges'));
+      const confirmedPublicPledges = pledgeRows
+        .map((r) => r.payload as Record<string, any> | null)
+        .filter((p): p is Record<string, any> => Boolean(p && p.status === 'confirmado'))
+        .map((p) => ({
+          id: String(p.id || ''),
+          protocol: String(p.protocol || ''),
+          donorName: 'Apoiador Confirmado',
+          amount: Number(p.amount) || 0,
+          purpose: String(p.purpose || 'Apoio Institucional'),
+          date: String(p.date || ''),
+          status: 'confirmado',
+        }));
+      const firstSetting = collections.site_settings[0];
+      if (firstSetting && typeof firstSetting === 'object') {
+        collections.site_settings[0] = {
+          ...(firstSetting as Record<string, unknown>),
+          donationPledges: confirmedPublicPledges,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to attach live bootstrap metrics:', err);
+  }
 }
 
 export async function deleteCollectionRecord(collectionName: string, itemId: string) {

@@ -18,11 +18,13 @@ import {
   ShieldCheck,
   Eye,
   Trophy,
+  Pencil,
 } from 'lucide-react';
 import {
   VitalizarProject,
   ProjectParticipant,
   syncProjectSpotsAndTeams,
+  getParticipantModalityProfile,
 } from '../types/index.ts';
 import { PlayerCard } from './PlayerCard.tsx';
 import { useClubData } from '../context/ClubDataContext.tsx';
@@ -35,6 +37,7 @@ interface ProjectDetailPageProps {
   onBack: () => void;
   onEnrollDirect: (project: VitalizarProject, teamId?: string) => void;
   onInspectPlayer: (participant: ProjectParticipant) => void;
+  onEditPlayer?: (participant: ProjectParticipant) => void;
   onOpenScoutContact: (participant: ProjectParticipant) => void;
 }
 
@@ -44,6 +47,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
   onBack,
   onEnrollDirect,
   onInspectPlayer,
+  onEditPlayer,
   onOpenScoutContact,
 }) => {
   const { projects } = useClubData();
@@ -361,6 +365,10 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filteredProjectParticipants.map((p) => {
                   const linkedTeam = teams.find((t) => t.id === p.teamId);
+                  const modProfile = getParticipantModalityProfile(
+                    p.modality || linkedTeam?.modality,
+                    p.modalityOrClass
+                  );
                   return (
                     <div
                       key={p.id}
@@ -376,22 +384,38 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                           />
                           <div className="min-w-0">
                             <span className="text-[11px] font-mono font-bold text-[#0284c7] block">
-                              Camisa #{p.jerseyNumber} · {p.category}
+                              Camisa #{p.jerseyNumber} · {p.category} · OVR {p.stats.overall}
                             </span>
                             <h4 className="font-extrabold text-sm text-slate-900 truncate">
                               {p.name}
                             </h4>
-                            <span className="text-[11px] text-slate-500 block truncate">
-                              {p.position} · {p.modality || linkedTeam?.modality || 'Esporte'}
+                            <span className="text-[11px] text-slate-600 block truncate">
+                              {p.position} · {modProfile.modalityName} ({modProfile.dominanceShortLabel}: {p.preferredFoot})
                             </span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200/70">
-                        <span className="text-[11px] font-semibold text-slate-700 truncate">
+                      <div className="flex items-center justify-between gap-2 text-[10px] text-slate-500 bg-white px-2.5 py-1.5 rounded-xl border border-slate-100">
+                        <span className="font-semibold text-slate-700 truncate">
                           {linkedTeam ? linkedTeam.name : p.modalityOrClass || liveProject.name}
                         </span>
+                        <span className="font-bold text-emerald-700 shrink-0">
+                          Freq. {p.schoolInfo?.attendanceRate || '98%'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200/70">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onEditPlayer ? onEditPlayer(p) : onInspectPlayer(p)
+                          }
+                          className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold rounded-xl transition-colors cursor-pointer shrink-0 flex items-center gap-1"
+                        >
+                          <Pencil className="w-3 h-3" />
+                          <span>Editar Perfil</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => onInspectPlayer(p)}
