@@ -172,7 +172,7 @@ export const ScoutContactModal: React.FC<ScoutContactModalProps> = ({
                     required
                     value={scoutName}
                     onChange={(e) => setScoutName(e.target.value)}
-                    placeholder="Ex: Carlos Eduardo de Oliveira"
+                    placeholder="Nome completo"
                     className="w-full pl-9 pr-3 py-2 bg-white rounded-xl border border-slate-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>

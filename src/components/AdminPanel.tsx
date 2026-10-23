@@ -27,11 +27,13 @@ import {
   Loader2,
   UserPlus,
 } from 'lucide-react';
-import type { AdminSectionId, AdminUserProfile } from '../admin/types.ts';
+import type { AdminRole, AdminSectionId, AdminUserProfile } from '../admin/types.ts';
 import {
   ROLE_LABELS,
   ROLE_SECTIONS,
   canAccessSection,
+  isStaffRole,
+  resolveProjectIdFromRsvp,
 } from '../admin/permissions.ts';
 import { useClubData } from '../context/ClubDataContext.tsx';
 import {
@@ -74,6 +76,27 @@ const SECTION_META: Record<
   usuarios: { label: 'Usuários & Perfis', icon: Shield },
   auditoria: { label: 'Log de Auditoria', icon: ClipboardList },
 };
+
+function getSectionLabelForRole(section: AdminSectionId, role: AdminRole): string {
+  if (role === 'visitante' || role === 'apoiador') {
+    if (section === 'inscricoes') return 'Minhas Inscrições';
+    if (section === 'comunidade') return 'Minhas Doações PIX';
+  }
+  if (role === 'professor' && section === 'projetos') {
+    return 'Minhas Turmas';
+  }
+  if (role === 'financeiro') {
+    if (section === 'comunidade') return 'Doações & Apoiadores';
+    if (section === 'configuracoes') return 'Configuração PIX';
+  }
+  if (role === 'parceiro' && section === 'comunidade') {
+    return 'Captação & Olheiros';
+  }
+  if (role === 'editor' && section === 'configuracoes') {
+    return 'Dados & Aviso do Site';
+  }
+  return SECTION_META[section]?.label || section;
+}
 
 function parseAdminHash(hash: string): {
   section: AdminSectionId;
@@ -280,20 +303,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen = true, onClose }
     }
 
     if (canAccessSection(role, 'inscricoes')) {
-      rsvps.forEach((r) => {
-        const name = r.studentName || r.name || '';
-        if (
-          name.toLowerCase().includes(q) ||
-          (r.eventTitle || '').toLowerCase().includes(q)
-        ) {
-          items.push({
-            id: `rsvp-${r.id}`,
-            title: name,
-            subtitle: `Inscrição · ${r.eventTitle}`,
-            section: 'inscricoes',
-          });
-        }
-      });
+      rsvps
+        .filter((r) => {
+          if (role === 'visitante' || role === 'apoiador') {
+            return (
+              (r.userId && r.userId === currentUserProfile.uid) ||
+              (r.email &&
+                r.email.trim().toLowerCase() ===
+                  (currentUserProfile.email || '').trim().toLowerCase())
+            );
+          }
+          if (role === 'professor') {
+            const pid = resolveProjectIdFromRsvp(r, projects);
+            return Boolean(pid && (currentUserProfile.projectIds || []).includes(pid));
+          }
+          return true;
+        })
+        .forEach((r) => {
+          const name = r.studentName || r.name || '';
+          if (
+            name.toLowerCase().includes(q) ||
+            (r.eventTitle || '').toLowerCase().includes(q)
+          ) {
+            items.push({
+              id: `rsvp-${r.id}`,
+              title: name,
+              subtitle: `Inscrição · ${r.eventTitle}`,
+              section: 'inscricoes',
+            });
+          }
+        });
     }
 
     if (canAccessSection(role, 'noticias')) {
@@ -458,27 +497,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen = true, onClose }
             <div className="flex items-center gap-2 truncate">
               <span className="w-2.5 h-2.5 rounded-full bg-[#0284c7] shrink-0" />
               <span className="font-extrabold text-sm tracking-tight truncate">
-                Vitalizar · Painel de Gestão & Comunidade
+                {currentUserProfile &&
+                (currentUserProfile.role === 'visitante' ||
+                  currentUserProfile.role === 'apoiador')
+                  ? 'Vitalizar · Área do Inscrito & Apoiador'
+                  : 'Vitalizar · Painel de Gestão & Comunidade'}
               </span>
             </div>
           </div>
 
-          {/* Global Search Trigger (Ctrl+K) */}
-          {currentUserProfile && currentUserProfile.ativo && (
-            <button
-              type="button"
-              onClick={() => setCmdOpen(true)}
-              className="hidden md:flex items-center justify-between gap-6 px-3 py-1.5 w-72 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-500 hover:border-slate-300 dark:hover:border-slate-700 cursor-pointer"
-            >
-              <span className="inline-flex items-center gap-2">
-                <Search className="w-3.5 h-3.5" />
-                <span>Buscar aluno, inscrição, notícia...</span>
-              </span>
-              <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                Ctrl+K
-              </kbd>
-            </button>
-          )}
+          {/* Global Search Trigger (Ctrl+K) - Staff roles only */}
+          {currentUserProfile &&
+            currentUserProfile.ativo &&
+            isStaffRole(currentUserProfile.role) && (
+              <button
+                type="button"
+                onClick={() => setCmdOpen(true)}
+                className="hidden md:flex items-center justify-between gap-6 px-3 py-1.5 w-72 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-500 hover:border-slate-300 dark:hover:border-slate-700 cursor-pointer"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Search className="w-3.5 h-3.5" />
+                  <span>Buscar nas seções do seu perfil...</span>
+                </span>
+                <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                  Ctrl+K
+                </kbd>
+              </button>
+            )}
 
           {/* Right Controls: Role badge, Theme Toggle, Logout, Close */}
           <div className="flex items-center gap-2">
@@ -650,7 +695,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen = true, onClose }
                     required
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="higor.rock2011@gmail.com"
+                    placeholder="seuemail@exemplo.com"
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
                   />
                 </div>
@@ -729,12 +774,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen = true, onClose }
                   const meta = SECTION_META[secId];
                   const Icon = meta.icon;
                   const isActive = activeSection === secId;
+                  const label = getSectionLabelForRole(secId, currentUserProfile.role);
                   return (
                     <button
                       key={secId}
                       type="button"
                       onClick={() => navigateToSection(secId)}
-                      title={sidebarCollapsed ? meta.label : undefined}
+                      title={sidebarCollapsed ? label : undefined}
                       className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                         isActive
                           ? 'bg-sky-50 dark:bg-sky-950/60 text-[#0284c7] dark:text-sky-400 font-bold'
@@ -743,7 +789,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen = true, onClose }
                     >
                       <Icon className="w-4 h-4 shrink-0" />
                       {!sidebarCollapsed && (
-                        <span className="truncate">{meta.label}</span>
+                        <span className="truncate">{label}</span>
                       )}
                     </button>
                   );
@@ -753,10 +799,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen = true, onClose }
               {!sidebarCollapsed && (
                 <div className="p-3 m-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 space-y-1">
                   <span className="font-bold text-slate-700 dark:text-slate-300 block">
-                    Proteção LGPD Ativa
+                    {isStaffRole(currentUserProfile.role)
+                      ? 'Proteção LGPD Ativa'
+                      : 'Acesso Pessoal Protegido'}
                   </span>
                   <span>
-                    Dados sensíveis de menores possuem máscara e registro em log.
+                    {isStaffRole(currentUserProfile.role)
+                      ? 'Visão restrita às permissões do seu cargo e turmas.'
+                      : 'Você visualiza apenas suas próprias inscrições e doações.'}
                   </span>
                 </div>
               )}

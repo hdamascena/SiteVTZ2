@@ -236,13 +236,13 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
       {/* Clean Editorial Header */}
       <div className="bg-white p-8 rounded-2xl border border-slate-200/90">
         <p className="text-xs font-semibold text-[#0284c7] tracking-wide">
-          Institucional · Rio Marinho, Cariacica/ES
+          Institucional · {clubInfo.address} · {clubInfo.municipality}
         </p>
         <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight mt-1">
-          Associação Esportiva Vitalizar
+          {clubInfo.fullName}
         </h1>
         <p className="mt-2 text-sm sm:text-base text-slate-600 max-w-3xl leading-relaxed">
-          Entidade civil sem fins lucrativos dedicada ao desenvolvimento esportivo, promoção da saúde preventiva, cultura e inclusão comunitária em Cariacica/ES.
+          Entidade civil sem fins lucrativos (CNPJ {clubInfo.cnpj}, fundada em {clubInfo.creationDate}) dedicada ao desenvolvimento esportivo, promoção da saúde preventiva, cultura e inclusão comunitária em {clubInfo.municipality}.
         </p>
       </div>
 
@@ -2668,6 +2668,7 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
     ];
 
     const filteredArticles = newsArticles.filter((art) => {
+      if ((art.status || 'publicado') === 'rascunho') return false;
       const matchCat =
         newsFilterCategory === 'all' ||
         art.category.toLowerCase().includes(newsFilterCategory.toLowerCase());
@@ -2921,7 +2922,10 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
           <div className="space-y-8">
             <SponsorsSection
               title="Rede de Patrocinadores & Parceiros Institucionais"
-              subtitle="Conheça as empresas, órgãos públicos e instituições que viabilizam o esporte gratuito e o impacto social da Associação Esportiva Vitalizar em Cariacica/ES."
+              subtitle={`Conheça as empresas, órgãos públicos e instituições que viabilizam o esporte gratuito e o impacto social da ${clubInfo.fullName} em ${clubInfo.municipality}.`}
+              onOpenContact={() => {
+                window.location.hash = '#contato';
+              }}
             />
           </div>
         )}

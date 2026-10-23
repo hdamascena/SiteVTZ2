@@ -89,11 +89,14 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
     if (role === 'editor') {
       return section === 'transparencia';
     }
+    if (role === 'financeiro') {
+      return section !== 'transparencia' && section !== 'configuracoes';
+    }
     if (role === 'parceiro') {
       return section !== 'patrocinadores';
     }
     if (role === 'professor') {
-      return true;
+      return section !== 'projetos';
     }
     return true;
   }, [role, section]);
@@ -314,7 +317,7 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                 className="pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
               />
             </div>
-            {!isReadOnly && (
+            {!isReadOnly && role !== 'professor' && (
               <button
                 type="button"
                 onClick={() => openEditProject()}
@@ -1238,6 +1241,14 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
 
   // ==================== 5. PATROCINADORES & PARCEIROS ====================
   if (section === 'patrocinadores') {
+    const DEFAULT_TIER_LABELS: Record<Sponsor['tier'], string> = {
+      master: 'Patrocinador Master',
+      ouro: 'Patrocinador Ouro',
+      prata: 'Patrocinador Prata',
+      bronze: 'Apoio Comunitário',
+      apoio: 'Parceiro Institucional',
+    };
+
     const openEditSponsor = (sp?: Sponsor) => {
       if (sp) {
         setDraftSponsor({ ...sp });
@@ -1263,16 +1274,27 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
       e.preventDefault();
       if (!draftSponsor || isReadOnly) return;
       setSaveState('saving');
-      const exists = sponsors.some((s) => s.id === draftSponsor.id);
-      const next = exists
-        ? sponsors.map((s) => (s.id === draftSponsor.id ? draftSponsor : s))
-        : [draftSponsor, ...sponsors];
-      saveAdminChanges({ sponsors: next }, `Parceiro salvo: ${draftSponsor.name}`);
+      const normalizedDraft: Sponsor = {
+        ...draftSponsor,
+        tierLabel:
+          draftSponsor.tierLabel?.trim() ||
+          DEFAULT_TIER_LABELS[draftSponsor.tier] ||
+          'Parceiro Institucional',
+        order: Number(draftSponsor.order) || 1,
+        active: draftSponsor.active !== false,
+      };
+      const exists = sponsors.some((s) => s.id === normalizedDraft.id);
+      const next = (
+        exists
+          ? sponsors.map((s) => (s.id === normalizedDraft.id ? normalizedDraft : s))
+          : [normalizedDraft, ...sponsors]
+      ).sort((a, b) => (a.order || 0) - (b.order || 0));
+      saveAdminChanges({ sponsors: next }, `Parceiro salvo: ${normalizedDraft.name}`);
       recordAuditEvent({
         action: exists ? 'update_sponsor' : 'create_sponsor',
         collection: 'sponsors',
-        itemId: draftSponsor.id,
-        afterSummary: draftSponsor.name,
+        itemId: normalizedDraft.id,
+        afterSummary: normalizedDraft.name,
         role,
       });
       triggerSavedIndicator();
@@ -1284,13 +1306,20 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
         id: 'name',
         header: 'Instituição / Parceiro',
         render: (s) => (
-          <div>
-            <span className="font-bold text-slate-900 dark:text-slate-100 block">
-              {s.name}
-            </span>
-            <span className="text-[11px] text-slate-500">
-              {s.tierLabel || s.tier}
-            </span>
+          <div className="flex items-center gap-2.5">
+            <img
+              src={s.logoUrl}
+              alt={s.name}
+              className="w-8 h-8 rounded-md object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+            />
+            <div>
+              <span className="font-bold text-slate-900 dark:text-slate-100 block">
+                {s.name}
+              </span>
+              <span className="text-[11px] text-slate-500">
+                {s.tierLabel || s.tier} · Ordem #{s.order || 1}
+              </span>
+            </div>
           </div>
         ),
       },
@@ -1299,6 +1328,21 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
         header: 'Frente de Impacto',
         render: (s) => (
           <span className="text-xs">{s.category || 'Institucional'}</span>
+        ),
+      },
+      {
+        id: 'status',
+        header: 'Visibilidade',
+        render: (s) => (
+          <span
+            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+              s.active !== false
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/60'
+                : 'bg-slate-100 text-slate-500 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+            }`}
+          >
+            {s.active !== false ? 'Ativo no Site' : 'Oculto'}
+          </span>
         ),
       },
       {
@@ -1311,6 +1355,7 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
               type="button"
               onClick={() => openEditSponsor(s)}
               className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              aria-label={`Editar ${s.name}`}
             >
               <Edit3 className="w-3.5 h-3.5" />
             </button>
@@ -1339,6 +1384,7 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                   })
                 }
                 className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer"
+                aria-label={`Excluir ${s.name}`}
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -1356,7 +1402,7 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
               Patrocinadores e Parceiros Institucionais
             </h2>
             <p className="text-xs text-slate-500">
-              Empresas apoiadoras, convênios públicos e instituições parceiras da Vitalizar.
+              Empresas apoiadoras, convênios públicos e instituições parceiras exibidas na página pública de Parceiros.
             </p>
           </div>
           {!isReadOnly && (
@@ -1402,12 +1448,19 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                   </label>
                   <select
                     value={draftSponsor.tier}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const nextTier = e.target.value as Sponsor['tier'];
+                      const prevDefault = DEFAULT_TIER_LABELS[draftSponsor.tier];
+                      const nextLabel =
+                        !draftSponsor.tierLabel || draftSponsor.tierLabel === prevDefault
+                          ? DEFAULT_TIER_LABELS[nextTier]
+                          : draftSponsor.tierLabel;
                       setDraftSponsor({
                         ...draftSponsor,
-                        tier: e.target.value as Sponsor['tier'],
-                      })
-                    }
+                        tier: nextTier,
+                        tierLabel: nextLabel,
+                      });
+                    }}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                   >
                     <option value="master">Cota Master</option>
@@ -1418,13 +1471,48 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                   </select>
                 </div>
                 <CampoTexto
+                  label="Selo / Título da Cota"
+                  value={draftSponsor.tierLabel || ''}
+                  onChange={(v) =>
+                    setDraftSponsor({ ...draftSponsor, tierLabel: v })
+                  }
+                  placeholder="Ex.: Parceiro Institucional"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <CampoTexto
                   label="Área de Impacto / Categoria"
                   value={draftSponsor.category}
                   onChange={(v) =>
                     setDraftSponsor({ ...draftSponsor, category: v })
                   }
                 />
+                <CampoTexto
+                  label="Ordem de Exibição"
+                  type="number"
+                  value={String(draftSponsor.order ?? 1)}
+                  onChange={(v) =>
+                    setDraftSponsor({
+                      ...draftSponsor,
+                      order: Number(v) || 1,
+                    })
+                  }
+                />
               </div>
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={draftSponsor.active !== false}
+                  onChange={(e) =>
+                    setDraftSponsor({
+                      ...draftSponsor,
+                      active: e.target.checked,
+                    })
+                  }
+                  className="rounded border-slate-300 text-[#0284c7] focus:ring-[#0284c7]"
+                />
+                <span>Exibir este parceiro na página pública de Parceiros</span>
+              </label>
               <CampoUploadImagem
                 label="Logomarca do Parceiro / Patrocinador"
                 disabled={isReadOnly}
@@ -2065,26 +2153,36 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
   }
 
   // ==================== 8. CONFIGURAÇÕES & PIX ====================
+  const canEditPix =
+    role === 'super_admin' || role === 'admin' || role === 'financeiro';
+  const canEditInstitutional =
+    role === 'super_admin' || role === 'admin' || role === 'editor';
+
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isReadOnly) return;
     setSaveState('saving');
     saveAdminChanges(
       {
-        clubInfo: draftClub,
+        ...(canEditInstitutional ? { clubInfo: draftClub } : {}),
         siteSettings: {
           ...siteSettings,
-          pixConfig: draftPix,
-          announcementBanner: draftBanner,
+          ...(canEditPix ? { pixConfig: draftPix } : {}),
+          ...(canEditInstitutional ? { announcementBanner: draftBanner } : {}),
         },
       },
-      'Configurações institucionais e PIX atualizados'
+      canEditPix && !canEditInstitutional
+        ? 'Configuração PIX oficial atualizada'
+        : 'Configurações institucionais atualizadas'
     );
     recordAuditEvent({
       action: 'update_settings',
       collection: 'site_settings',
       itemId: 'main',
-      afterSummary: `PIX: ${draftPix.pixKeyFormatted} | Aviso: ${draftBanner.enabled ? 'Ativo' : 'Inativo'}`,
+      afterSummary:
+        canEditPix && !canEditInstitutional
+          ? `PIX: ${draftPix.pixKeyFormatted}`
+          : `Aviso: ${draftBanner.enabled ? 'Ativo' : 'Inativo'}`,
       role,
     });
     triggerSavedIndicator();
@@ -2095,12 +2193,18 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-base font-extrabold text-slate-900 dark:text-slate-100">
-            Configurações Institucionais, PIX e Banner do Site
+            {role === 'financeiro'
+              ? 'Configuração PIX Oficial (Doações)'
+              : role === 'editor'
+              ? 'Dados Institucionais e Aviso do Site'
+              : 'Configurações Institucionais, PIX e Banner do Site'}
           </h2>
           <p className="text-xs text-slate-500">
             {isReadOnly
               ? 'Visualização de conferência financeira e institucional (somente leitura).'
-              : 'Atualize dados oficiais da Associação, chave PIX e comunicado de topo.'}
+              : role === 'financeiro'
+              ? 'Gerencie os dados bancários e a chave PIX oficial exibida para doadores.'
+              : 'Atualize dados oficiais da Associação e comunicados exibidos no portal.'}
           </p>
         </div>
         {!isReadOnly && (
@@ -2125,121 +2229,135 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Dados PIX */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-            Configuração PIX Oficial (Doações)
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* Dados PIX - Visível apenas para Financeiro, Admin e Super Admin */}
+        {canEditPix && (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              Configuração PIX Oficial (Doações)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <CampoTexto
+                label="Chave PIX (Somente números/CNPJ)"
+                disabled={isReadOnly}
+                value={draftPix.pixKey}
+                onChange={(v) => setDraftPix({ ...draftPix, pixKey: v })}
+              />
+              <CampoTexto
+                label="Chave Formatada (Exibição)"
+                disabled={isReadOnly}
+                value={draftPix.pixKeyFormatted}
+                onChange={(v) => setDraftPix({ ...draftPix, pixKeyFormatted: v })}
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <CampoTexto
+                label="Nome do Recebedor (Padrão EMV)"
+                disabled={isReadOnly}
+                value={draftPix.beneficiaryName}
+                onChange={(v) => setDraftPix({ ...draftPix, beneficiaryName: v })}
+              />
+              <CampoTexto
+                label="Cidade (Padrão EMV)"
+                disabled={isReadOnly}
+                value={draftPix.city}
+                onChange={(v) => setDraftPix({ ...draftPix, city: v })}
+              />
+            </div>
             <CampoTexto
-              label="Chave PIX (Somente números/CNPJ)"
+              label="Informações Bancárias Complementares"
               disabled={isReadOnly}
-              value={draftPix.pixKey}
-              onChange={(v) => setDraftPix({ ...draftPix, pixKey: v })}
-            />
-            <CampoTexto
-              label="Chave Formatada (Exibição)"
-              disabled={isReadOnly}
-              value={draftPix.pixKeyFormatted}
-              onChange={(v) => setDraftPix({ ...draftPix, pixKeyFormatted: v })}
+              value={draftPix.bankName}
+              onChange={(v) => setDraftPix({ ...draftPix, bankName: v })}
             />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <CampoTexto
-              label="Nome do Recebedor (Padrão EMV)"
-              disabled={isReadOnly}
-              value={draftPix.beneficiaryName}
-              onChange={(v) => setDraftPix({ ...draftPix, beneficiaryName: v })}
-            />
-            <CampoTexto
-              label="Cidade (Padrão EMV)"
-              disabled={isReadOnly}
-              value={draftPix.city}
-              onChange={(v) => setDraftPix({ ...draftPix, city: v })}
-            />
-          </div>
-          <CampoTexto
-            label="Informações Bancárias Complementares"
-            disabled={isReadOnly}
-            value={draftPix.bankName}
-            onChange={(v) => setDraftPix({ ...draftPix, bankName: v })}
-          />
-        </div>
+        )}
 
-        {/* Dados da Associação */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-            Dados Institucionais (Rodapé e Cabeçalho)
-          </h3>
-          <CampoTexto
-            label="Razão Social / Nome Oficial"
-            disabled={isReadOnly}
-            value={draftClub.name}
-            onChange={(v) => setDraftClub({ ...draftClub, name: v })}
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* Dados da Associação - Visível apenas para Editor, Admin e Super Admin */}
+        {canEditInstitutional && (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              Dados Institucionais (Rodapé e Cabeçalho)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <CampoTexto
+                label="Razão Social / Nome Oficial"
+                disabled={isReadOnly}
+                value={draftClub.fullName}
+                onChange={(v) => setDraftClub({ ...draftClub, fullName: v })}
+              />
+              <CampoTexto
+                label="Sigla / Nome no Cabeçalho"
+                disabled={isReadOnly}
+                value={draftClub.shortName}
+                onChange={(v) => setDraftClub({ ...draftClub, shortName: v })}
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <CampoTexto
+                label="CNPJ"
+                disabled={isReadOnly}
+                value={draftClub.cnpj}
+                onChange={(v) => setDraftClub({ ...draftClub, cnpj: v })}
+              />
+              <CampoTexto
+                label="Presidente"
+                disabled={isReadOnly}
+                value={draftClub.president}
+                onChange={(v) => setDraftClub({ ...draftClub, president: v })}
+              />
+            </div>
             <CampoTexto
-              label="CNPJ"
+              label="E-mail Institucional"
               disabled={isReadOnly}
-              value={draftClub.cnpj}
-              onChange={(v) => setDraftClub({ ...draftClub, cnpj: v })}
+              value={draftClub.email}
+              onChange={(v) => setDraftClub({ ...draftClub, email: v })}
             />
             <CampoTexto
-              label="Presidente"
+              label="Endereço da Sede"
               disabled={isReadOnly}
-              value={draftClub.president}
-              onChange={(v) => setDraftClub({ ...draftClub, president: v })}
+              value={draftClub.address}
+              onChange={(v) => setDraftClub({ ...draftClub, address: v })}
             />
           </div>
-          <CampoTexto
-            label="E-mail Institucional"
-            disabled={isReadOnly}
-            value={draftClub.email}
-            onChange={(v) => setDraftClub({ ...draftClub, email: v })}
-          />
-          <CampoTexto
-            label="Endereço da Sede"
-            disabled={isReadOnly}
-            value={draftClub.address}
-            onChange={(v) => setDraftClub({ ...draftClub, address: v })}
-          />
-        </div>
+        )}
       </div>
 
-      {/* Banner de Aviso */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-            Faixa de Aviso Rápido no Topo do Site
-          </h3>
-          <label className="inline-flex items-center gap-2 text-xs font-semibold cursor-pointer">
-            <input
-              type="checkbox"
+      {/* Banner de Aviso - Visível apenas para Editor, Admin e Super Admin */}
+      {canEditInstitutional && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              Faixa de Aviso Rápido no Topo do Site
+            </h3>
+            <label className="inline-flex items-center gap-2 text-xs font-semibold cursor-pointer">
+              <input
+                type="checkbox"
+                disabled={isReadOnly}
+                checked={draftBanner.enabled}
+                onChange={(e) =>
+                  setDraftBanner({ ...draftBanner, enabled: e.target.checked })
+                }
+                className="rounded border-slate-300"
+              />
+              <span>Exibir aviso no topo do site</span>
+            </label>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <CampoTexto
+              label="Texto do Comunicado"
               disabled={isReadOnly}
-              checked={draftBanner.enabled}
-              onChange={(e) =>
-                setDraftBanner({ ...draftBanner, enabled: e.target.checked })
-              }
-              className="rounded border-slate-300"
+              value={draftBanner.text}
+              onChange={(v) => setDraftBanner({ ...draftBanner, text: v })}
             />
-            <span>Exibir aviso no topo do site</span>
-          </label>
+            <CampoTexto
+              label="Rótulo do Botão de Ação"
+              disabled={isReadOnly}
+              value={draftBanner.linkLabel}
+              onChange={(v) => setDraftBanner({ ...draftBanner, linkLabel: v })}
+            />
+          </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <CampoTexto
-            label="Texto do Comunicado"
-            disabled={isReadOnly}
-            value={draftBanner.text}
-            onChange={(v) => setDraftBanner({ ...draftBanner, text: v })}
-          />
-          <CampoTexto
-            label="Rótulo do Botão de Ação"
-            disabled={isReadOnly}
-            value={draftBanner.linkLabel}
-            onChange={(v) => setDraftBanner({ ...draftBanner, linkLabel: v })}
-          />
-        </div>
-      </div>
+      )}
     </form>
   );
 };

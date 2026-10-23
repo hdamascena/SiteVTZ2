@@ -29,14 +29,28 @@ import {
 } from '../utils/adminAuth.ts';
 import type { AuditLogEntry } from '../utils/adminAuth.ts';
 import { db, auth } from '../firebase.ts';
-import { doc, getDoc, getDocs, collection, setDoc, deleteDoc } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  getDocs,
+  collection,
+  setDoc,
+  deleteDoc,
+  query,
+  where,
+} from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import type {
   AdminUserProfile,
   ParticipantPrivateRecord,
   ProjectEnrollmentStatus,
 } from '../admin/types.ts';
-import { splitParticipantPublicAndPrivate } from '../admin/permissions.ts';
+import {
+  canRoleWriteCollection,
+  filterPrivateCollectionsForUser,
+  getReadablePrivateCollections,
+  splitParticipantPublicAndPrivate,
+} from '../admin/permissions.ts';
 import {
   promoteVisitorToSupporter,
   verifyFirebaseAdminAccess,
@@ -472,12 +486,6 @@ function normalizeTransparencyDocs(raw?: TransparencyDocument[] | null): Transpa
     });
   }
 
-  for (const defDoc of TRANSPARENCY_DOCUMENTS) {
-    if (!seenIds.has(defDoc.id)) {
-      seenIds.add(defDoc.id);
-      merged.push(defDoc);
-    }
-  }
   return merged;
 }
 
@@ -815,132 +823,21 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   });
 
-  // 5d. Scout Inquiries (Captação & Olheiros)
-  const [scoutInquiries, setScoutInquiries] = useState<ScoutInquiryRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.SCOUT_INQUIRIES);
-      return saved
-        ? JSON.parse(saved)
-        : [
-            {
-              id: 'scout-seed-1',
-              protocol: 'SCT-2026-4812',
-              scoutName: 'Roberto Avelar',
-              organization: 'Departamento de Captação Desportiva Capixaba',
-              role: 'Observador Técnico Sub-15/Sub-17',
-              credentialsId: 'CREF 014982-G/ES',
-              phone: '(27) 99912-8834',
-              email: 'captacao.avelar@esportees.com.br',
-              inquiryType: 'avaliacao_clube',
-              targetPlayerName: 'João Victor "JV10" (Camisa 10)',
-              targetCategory: 'Sub-15',
-              preferredDate: '2026-11-10',
-              message:
-                'Acompanhamos o desempenho do atleta João Victor no último festival regional e gostaríamos de agendar uma semana de avaliação monitorada junto à comissão técnica da Vitalizar.',
-              projectName: 'Iniciação Esportiva & Cidadania (Futsal e Vôlei)',
-              createdAt: '16/10/2026 14:20',
-              status: 'nova',
-            },
-          ];
-    } catch {
-      return [];
-    }
-  });
+  // 5d. Scout Inquiries (Captação & Olheiros) - hydrated only for authorized roles
+  const [scoutInquiries, setScoutInquiries] = useState<ScoutInquiryRecord[]>([]);
 
+  // 6. RSVPs - hydrated only for authorized roles
+  const [rsvps, setRsvps] = useState<EventRsvpRecord[]>([]);
 
-  // 6. RSVPs
-  const [rsvps, setRsvps] = useState<EventRsvpRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.RSVPS);
-      return saved
-        ? JSON.parse(saved)
-        : [
-            {
-              id: 'rsvp-seed-1',
-              eventId: 'clinica-futsal-transicoes',
-              eventTitle: 'Clínica de Futsal: Transições Rápidas',
-              name: 'Marcos Vinicius Santos',
-              phone: '(27) 99823-1144',
-              spots: 2,
-              date: new Date().toLocaleDateString('pt-BR'),
-              confirmationCode: 'VTL-FUTSAL-8921',
-            },
-            {
-              id: 'rsvp-seed-2',
-              eventId: 'oficina-primeiros-socorros',
-              eventTitle: 'Oficina de Primeiros Socorros & Prevenção no Esporte',
-              name: 'Ana Cláudia Ribeiro',
-              phone: '(27) 98112-4590',
-              spots: 1,
-              date: new Date().toLocaleDateString('pt-BR'),
-              confirmationCode: 'VTL-SOCORR-3482',
-            },
-          ];
-    } catch {
-      return [];
-    }
-  });
+  // 7. Contact Messages - hydrated only for authorized roles
+  const [contactMessages, setContactMessages] = useState<ContactMessageRecord[]>([]);
 
-  // 7. Contact Messages
-  const [contactMessages, setContactMessages] = useState<ContactMessageRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.MESSAGES);
-      return saved
-        ? JSON.parse(saved)
-        : [
-            {
-              id: 'msg-seed-1',
-              name: 'Carlos Eduardo Lima',
-              email: 'carlos.lima@gmail.com',
-              phone: '(27) 99765-4321',
-              subject: 'Voluntariado',
-              message:
-                'Gostaria de me candidatar como voluntário para dar aulas de reforço escolar e apoio aos treinos de futsal nos finais de semana.',
-              date: '14/10/2026 16:40',
-              read: false,
-            },
-          ];
-    } catch {
-      return [];
-    }
-  });
-
-  // 8. Audit Logs
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.LOGS);
-      return saved
-        ? JSON.parse(saved)
-        : [
-            createAuditLogEntry(
-              'SISTEMA_INICIALIZADO',
-              'sistema@vitalizar.org.br',
-              'Base de dados inicial da Associação Vitalizar carregada.'
-            ),
-          ];
-    } catch {
-      return [];
-    }
-  });
+  // 8. Audit Logs - hydrated only for admin/super_admin
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
 
   const [participantPrivateMap, setParticipantPrivateMap] = useState<
     Record<string, ParticipantPrivateRecord>
-  >(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.PARTICIPANT_PRIVATE);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    const seedMap: Record<string, ParticipantPrivateRecord> = {};
-    VITALIZAR_PROJECTS.forEach((pr) => {
-      (pr.participants || []).forEach((pt) => {
-        const { privateRecord } = splitParticipantPublicAndPrivate(pt, pr.id);
-        seedMap[pt.id] = privateRecord;
-      });
-    });
-    return seedMap;
-  });
+  >({});
 
   const [isFirebaseActive, setIsFirebaseActive] = useState<boolean>(true);
   const [currentUserProfile, setCurrentUserProfile] =
@@ -948,25 +845,79 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [authLoading, setAuthLoading] = useState<boolean>(true);
   // Set once an admin has loaded the private settings lists, so the public doc never overwrites them
   const privateSettingsLoaded = useRef(false);
+  const authTokenRef = useRef<string | null>(null);
+
+  const clearPrivateStateOnLogout = () => {
+    privateSettingsLoaded.current = false;
+    setRsvps([]);
+    setContactMessages([]);
+    setScoutInquiries([]);
+    setAuditLogs([]);
+    setParticipantPrivateMap({});
+    setSiteSettingsState((prev) => toPublicSiteSettings(prev));
+    try {
+      localStorage.removeItem(STORAGE_KEYS.RSVPS);
+      localStorage.removeItem(STORAGE_KEYS.MESSAGES);
+      localStorage.removeItem(STORAGE_KEYS.SCOUT_INQUIRIES);
+      localStorage.removeItem(STORAGE_KEYS.PARTICIPANT_PRIVATE);
+      localStorage.removeItem(STORAGE_KEYS.LOGS);
+    } catch {
+      // ignore
+    }
+  };
+
+  const syncUserWithSqlBackend = async (
+    token: string,
+    profile?: AdminUserProfile | null
+  ): Promise<AdminUserProfile | null> => {
+    try {
+      const r = await fetch('/api/me', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: profile?.nome,
+        }),
+      });
+      if (!r.ok) return null;
+      return (await r.json()) as AdminUserProfile;
+    } catch {
+      return null;
+    }
+  };
 
   const refreshUserProfile = async () => {
     const user = auth.currentUser;
     if (!user) {
+      authTokenRef.current = null;
       setCurrentUserProfile(null);
       setAuthLoading(false);
+      clearPrivateStateOnLogout();
       return;
     }
+    const token = await user.getIdToken();
+    authTokenRef.current = token;
     const res = await verifyFirebaseAdminAccess(user);
-    setCurrentUserProfile(res.profile || null);
+    const sqlProfile = await syncUserWithSqlBackend(token, res.profile);
+    const resolvedProfile =
+      res.profile?.role === 'visitante' &&
+      sqlProfile &&
+      sqlProfile.role !== 'visitante'
+        ? sqlProfile
+        : res.profile || sqlProfile || null;
+    setCurrentUserProfile(resolvedProfile);
     setAuthLoading(false);
   };
 
-  // Sync initial data from Firestore if available (Batched in a single render pass)
+  // Sync initial data from Cloud SQL (/api/bootstrap) and Firestore if available
   useEffect(() => {
     let isMounted = true;
-    async function hydrateFromFirestore() {
+    async function hydrateFromRemote() {
       try {
         const [
+          sqlRes,
           clubRes,
           settingsRes,
           newsRes,
@@ -977,6 +928,7 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           docsRes,
           polosRes,
         ] = await Promise.allSettled([
+          fetch('/api/bootstrap').then((r) => (r.ok ? r.json() : null)),
           getDoc(doc(db, 'club_info', 'main')),
           getDoc(doc(db, 'site_settings', 'main')),
           getDocs(collection(db, 'news_articles')),
@@ -990,18 +942,31 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         if (!isMounted) return;
 
-        if (clubRes.status === 'fulfilled' && clubRes.value.exists()) {
-          const remoteData = normalizeClubInfo(
-            clubRes.value.data() as Partial<typeof CLUB_INFO>
-          );
+        const sqlCols: Record<string, any[]> =
+          sqlRes.status === 'fulfilled' && sqlRes.value?.collections
+            ? sqlRes.value.collections
+            : {};
+
+        const rawClub =
+          Array.isArray(sqlCols.club_info) && sqlCols.club_info.length > 0
+            ? sqlCols.club_info[0]
+            : clubRes.status === 'fulfilled' && clubRes.value.exists()
+            ? clubRes.value.data()
+            : null;
+        if (rawClub) {
+          const remoteData = normalizeClubInfo(rawClub as Partial<typeof CLUB_INFO>);
           setClubInfoState(remoteData);
           localStorage.setItem(STORAGE_KEYS.CLUB_INFO, JSON.stringify(remoteData));
         }
 
-        if (settingsRes.status === 'fulfilled' && settingsRes.value.exists()) {
-          const remoteSettings = normalizeSiteSettings(
-            settingsRes.value.data() as Partial<SiteSettings>
-          );
+        const rawSettings =
+          Array.isArray(sqlCols.site_settings) && sqlCols.site_settings.length > 0
+            ? sqlCols.site_settings[0]
+            : settingsRes.status === 'fulfilled' && settingsRes.value.exists()
+            ? settingsRes.value.data()
+            : null;
+        if (rawSettings) {
+          const remoteSettings = normalizeSiteSettings(rawSettings as Partial<SiteSettings>);
           setSiteSettingsState((prev) => {
             const merged = privateSettingsLoaded.current
               ? {
@@ -1016,87 +981,156 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           });
         }
 
-        if (newsRes.status === 'fulfilled' && !newsRes.value.empty) {
-          const remoteNews = normalizeNewsArticles(
-            newsRes.value.docs.map((d) => d.data() as NewsArticle)
-          );
+        const rawNews =
+          Array.isArray(sqlCols.news_articles) && sqlCols.news_articles.length > 0
+            ? sqlCols.news_articles
+            : newsRes.status === 'fulfilled' && !newsRes.value.empty
+            ? newsRes.value.docs.map((d) => d.data())
+            : null;
+        if (rawNews) {
+          const remoteNews = normalizeNewsArticles(rawNews as NewsArticle[]);
           setNewsArticles(remoteNews);
           localStorage.setItem(STORAGE_KEYS.NEWS, JSON.stringify(remoteNews));
         }
 
-        if (sponsorsRes.status === 'fulfilled' && !sponsorsRes.value.empty) {
-          const remoteSponsors = normalizeSponsors(
-            sponsorsRes.value.docs.map((d) => d.data() as Sponsor)
-          );
+        const rawSponsors =
+          Array.isArray(sqlCols.sponsors) && sqlCols.sponsors.length > 0
+            ? sqlCols.sponsors
+            : sponsorsRes.status === 'fulfilled' && !sponsorsRes.value.empty
+            ? sponsorsRes.value.docs.map((d) => d.data())
+            : null;
+        if (rawSponsors) {
+          const remoteSponsors = normalizeSponsors(rawSponsors as Sponsor[]);
           remoteSponsors.sort((a, b) => (a.order || 0) - (b.order || 0));
           setSponsors(remoteSponsors);
           localStorage.setItem(STORAGE_KEYS.SPONSORS, JSON.stringify(remoteSponsors));
         }
 
-        if (eventsRes.status === 'fulfilled' && !eventsRes.value.empty) {
-          const remoteEvents = normalizeEvents(
-            eventsRes.value.docs.map((d) => d.data() as VitalizarEvent)
-          );
+        const rawEvents =
+          Array.isArray(sqlCols.events) && sqlCols.events.length > 0
+            ? sqlCols.events
+            : eventsRes.status === 'fulfilled' && !eventsRes.value.empty
+            ? eventsRes.value.docs.map((d) => d.data())
+            : null;
+        if (rawEvents) {
+          const remoteEvents = normalizeEvents(rawEvents as VitalizarEvent[]);
           setEvents(remoteEvents);
           localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(remoteEvents));
         }
 
-        if (projectsRes.status === 'fulfilled' && !projectsRes.value.empty) {
-          const remoteProjects = normalizeProjects(
-            projectsRes.value.docs.map((d) => d.data() as VitalizarProject)
-          );
+        const rawProjects =
+          Array.isArray(sqlCols.projects) && sqlCols.projects.length > 0
+            ? sqlCols.projects
+            : projectsRes.status === 'fulfilled' && !projectsRes.value.empty
+            ? projectsRes.value.docs.map((d) => d.data())
+            : null;
+        if (rawProjects) {
+          const remoteProjects = normalizeProjects(rawProjects as VitalizarProject[]);
           setProjects(remoteProjects);
           localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(remoteProjects));
         }
 
-        if (galleryRes.status === 'fulfilled' && !galleryRes.value.empty) {
-          const remoteAlbums = normalizeGalleryAlbums(
-            galleryRes.value.docs.map((d) => d.data() as PastEventPhoto)
-          );
+        const rawGallery =
+          Array.isArray(sqlCols.gallery_albums) && sqlCols.gallery_albums.length > 0
+            ? sqlCols.gallery_albums
+            : galleryRes.status === 'fulfilled' && !galleryRes.value.empty
+            ? galleryRes.value.docs.map((d) => d.data())
+            : null;
+        if (rawGallery) {
+          const remoteAlbums = normalizeGalleryAlbums(rawGallery as PastEventPhoto[]);
           setGalleryAlbums(remoteAlbums);
           localStorage.setItem(STORAGE_KEYS.GALLERY, JSON.stringify(remoteAlbums));
         }
 
-        if (docsRes.status === 'fulfilled' && !docsRes.value.empty) {
-          const remoteDocs = normalizeTransparencyDocs(
-            docsRes.value.docs.map((d) => d.data() as TransparencyDocument)
-          );
+        const rawDocs =
+          Array.isArray(sqlCols.transparency_docs) && sqlCols.transparency_docs.length > 0
+            ? sqlCols.transparency_docs
+            : docsRes.status === 'fulfilled' && !docsRes.value.empty
+            ? docsRes.value.docs.map((d) => d.data())
+            : null;
+        if (rawDocs) {
+          const remoteDocs = normalizeTransparencyDocs(rawDocs as TransparencyDocument[]);
           setTransparencyDocs(remoteDocs);
           localStorage.setItem(STORAGE_KEYS.TRANSPARENCY, JSON.stringify(remoteDocs));
         }
 
-        if (polosRes.status === 'fulfilled' && !polosRes.value.empty) {
-          const remotePolos = normalizeFacilityPolos(
-            polosRes.value.docs.map((d) => d.data() as FacilityPolo)
-          );
+        const rawPolos =
+          Array.isArray(sqlCols.facility_polos) && sqlCols.facility_polos.length > 0
+            ? sqlCols.facility_polos
+            : polosRes.status === 'fulfilled' && !polosRes.value.empty
+            ? polosRes.value.docs.map((d) => d.data())
+            : null;
+        if (rawPolos) {
+          const remotePolos = normalizeFacilityPolos(rawPolos as FacilityPolo[]);
           setFacilityPolos(remotePolos);
           localStorage.setItem(STORAGE_KEYS.POLOS, JSON.stringify(remotePolos));
         }
 
         setIsFirebaseActive(true);
       } catch (err) {
-        console.info('Firestore offline ou em fallback local:', err);
+        console.info('Banco remoto offline ou em fallback local:', err);
       }
     }
-    hydrateFromFirestore();
+    hydrateFromRemote();
     return () => {
       isMounted = false;
     };
   }, []);
 
-  // Admin-only records (visitor submissions and private lists): the rules deny these reads to anyone else
+  // Role-scoped private records: hydrated from Cloud SQL and Firestore strictly according to user role
   useEffect(() => {
     return onAuthStateChanged(auth, async (user) => {
       if (!user) {
+        authTokenRef.current = null;
         setCurrentUserProfile(null);
         setAuthLoading(false);
+        clearPrivateStateOnLogout();
         return;
       }
       setAuthLoading(true);
-      const accessRes = await verifyFirebaseAdminAccess(user);
-      setCurrentUserProfile(accessRes.profile || null);
+      const token = await user.getIdToken().catch(() => null);
+      authTokenRef.current = token;
+      const [accessRes, sqlProfile] = await Promise.all([
+        verifyFirebaseAdminAccess(user),
+        token ? syncUserWithSqlBackend(token, null) : Promise.resolve(null),
+      ]);
+      const activeProfile =
+        accessRes.profile?.role === 'visitante' &&
+        sqlProfile &&
+        sqlProfile.role !== 'visitante'
+          ? sqlProfile
+          : accessRes.profile || sqlProfile || null;
+
+      setCurrentUserProfile(activeProfile);
       setAuthLoading(false);
+
+      if (!activeProfile || !activeProfile.ativo) {
+        clearPrivateStateOnLogout();
+        return;
+      }
+
+      const role = activeProfile.role;
+      const readableCols = new Set(getReadablePrivateCollections(role));
+      const profProjectIds = (activeProfile.projectIds || []).slice(0, 30);
+
+      const queryFsCollection = (colName: string) => {
+        if (!readableCols.has(colName)) return Promise.resolve(null);
+        if (role === 'professor') {
+          if (profProjectIds.length === 0) return Promise.resolve(null);
+          return getDocs(
+            query(collection(db, colName), where('projectId', 'in', profProjectIds))
+          );
+        }
+        if (role === 'visitante' || role === 'apoiador') {
+          return getDocs(
+            query(collection(db, colName), where('userId', '==', user.uid))
+          );
+        }
+        return getDocs(collection(db, colName));
+      };
+
       const [
+        sqlAdminRes,
         rsvpRes,
         msgRes,
         scoutRes,
@@ -1106,85 +1140,274 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         partPrivRes,
         logsRes,
       ] = await Promise.allSettled([
-        getDocs(collection(db, 'rsvps')),
-        getDocs(collection(db, 'contact_messages')),
-        getDocs(collection(db, 'scout_inquiries')),
-        getDocs(collection(db, PRIVATE_SETTINGS_COLLECTIONS.donationPledges)),
-        getDocs(collection(db, PRIVATE_SETTINGS_COLLECTIONS.volunteers)),
-        getDocs(collection(db, PRIVATE_SETTINGS_COLLECTIONS.attendanceSessions)),
-        getDocs(collection(db, 'participant_private')),
-        getDocs(collection(db, 'audit_logs')),
+        token
+          ? fetch('/api/admin/bootstrap', {
+              headers: { Authorization: `Bearer ${token}` },
+            }).then((r) => (r.ok ? r.json() : null))
+          : Promise.resolve(null),
+        queryFsCollection('rsvps'),
+        queryFsCollection('contact_messages'),
+        queryFsCollection('scout_inquiries'),
+        queryFsCollection(PRIVATE_SETTINGS_COLLECTIONS.donationPledges),
+        queryFsCollection(PRIVATE_SETTINGS_COLLECTIONS.volunteers),
+        queryFsCollection(PRIVATE_SETTINGS_COLLECTIONS.attendanceSessions),
+        queryFsCollection('participant_private'),
+        queryFsCollection('audit_logs'),
       ]);
 
-      if (rsvpRes.status === 'fulfilled') {
-        const remote = rsvpRes.value.docs.map((d) => d.data() as EventRsvpRecord);
-        setRsvps((prev) => {
-          const updated = mergeRemoteFirst(remote, prev);
-          localStorage.setItem(STORAGE_KEYS.RSVPS, JSON.stringify(updated));
-          return updated;
-        });
-      }
-      if (msgRes.status === 'fulfilled') {
-        const remote = msgRes.value.docs.map((d) => d.data() as ContactMessageRecord);
-        setContactMessages((prev) => {
-          const updated = mergeRemoteFirst(remote, prev);
-          localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(updated));
-          return updated;
-        });
-      }
-      if (scoutRes.status === 'fulfilled') {
-        const remote = scoutRes.value.docs.map((d) => d.data() as ScoutInquiryRecord);
-        setScoutInquiries((prev) => {
-          const updated = mergeRemoteFirst(remote, prev);
-          localStorage.setItem(STORAGE_KEYS.SCOUT_INQUIRIES, JSON.stringify(updated));
-          return updated;
-        });
-      }
-      if (partPrivRes.status === 'fulfilled' && !partPrivRes.value.empty) {
-        setParticipantPrivateMap((prev) => {
-          const next = { ...prev };
-          partPrivRes.value.docs.forEach((d) => {
-            const rec = d.data() as ParticipantPrivateRecord;
-            next[rec.id || d.id] = rec;
+      const sqlAdminCols: Record<string, any[]> =
+        sqlAdminRes.status === 'fulfilled' && sqlAdminRes.value?.collections
+          ? sqlAdminRes.value.collections
+          : {};
+
+      const extractDocs = <T,>(
+        res: PromiseSettledResult<Awaited<ReturnType<typeof getDocs>> | null>
+      ): T[] =>
+        res.status === 'fulfilled' && res.value
+          ? res.value.docs.map((d) => ({ ...(d.data() as T), id: (d.data() as any).id || d.id }))
+          : [];
+
+      const rawCombined = {
+        rsvps: mergeRemoteFirst(
+          (sqlAdminCols.rsvps || []) as EventRsvpRecord[],
+          extractDocs<EventRsvpRecord>(rsvpRes)
+        ),
+        contact_messages: mergeRemoteFirst(
+          (sqlAdminCols.contact_messages || []) as ContactMessageRecord[],
+          extractDocs<ContactMessageRecord>(msgRes)
+        ),
+        scout_inquiries: mergeRemoteFirst(
+          (sqlAdminCols.scout_inquiries || []) as ScoutInquiryRecord[],
+          extractDocs<ScoutInquiryRecord>(scoutRes)
+        ),
+        donation_pledges: mergeRemoteFirst(
+          (sqlAdminCols.donation_pledges || []) as DonationPledgeRecord[],
+          extractDocs<DonationPledgeRecord>(pledgeRes)
+        ),
+        volunteer_applications: mergeRemoteFirst(
+          (sqlAdminCols.volunteer_applications || []) as VolunteerApplicationRecord[],
+          extractDocs<VolunteerApplicationRecord>(volRes)
+        ),
+        attendance_sessions: mergeRemoteFirst(
+          (sqlAdminCols.attendance_sessions || []) as AttendanceSessionRecord[],
+          extractDocs<AttendanceSessionRecord>(attendanceRes)
+        ),
+        participant_private: mergeRemoteFirst(
+          (sqlAdminCols.participant_private || []) as ParticipantPrivateRecord[],
+          extractDocs<ParticipantPrivateRecord>(partPrivRes)
+        ),
+        audit_logs: mergeRemoteFirst(
+          (sqlAdminCols.audit_logs || []) as AuditLogEntry[],
+          extractDocs<AuditLogEntry>(logsRes)
+        ),
+      };
+
+      const filtered = filterPrivateCollectionsForUser(
+        rawCombined,
+        activeProfile,
+        projects
+      );
+
+      setRsvps(filtered.rsvps as EventRsvpRecord[]);
+      setContactMessages(filtered.contact_messages as ContactMessageRecord[]);
+      setScoutInquiries(filtered.scout_inquiries as ScoutInquiryRecord[]);
+
+      const privMap: Record<string, ParticipantPrivateRecord> = {};
+      if (role === 'super_admin' || role === 'admin' || role === 'professor') {
+        const allowedProjSet =
+          role === 'professor' ? new Set(activeProfile.projectIds || []) : null;
+        VITALIZAR_PROJECTS.forEach((pr) => {
+          if (allowedProjSet && !allowedProjSet.has(pr.id)) return;
+          (pr.participants || []).forEach((pt) => {
+            const { privateRecord } = splitParticipantPublicAndPrivate(pt, pr.id);
+            privMap[pt.id] = privateRecord;
           });
-          localStorage.setItem(STORAGE_KEYS.PARTICIPANT_PRIVATE, JSON.stringify(next));
-          return next;
         });
       }
-      if (logsRes.status === 'fulfilled' && !logsRes.value.empty) {
-        const remoteLogs = logsRes.value.docs.map((d) => d.data() as AuditLogEntry);
-        remoteLogs.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-        setAuditLogs((prev) => {
-          const updated = mergeRemoteFirst(remoteLogs, prev).slice(0, 200);
-          localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(updated));
-          return updated;
-        });
-      }
-      if (
-        pledgeRes.status === 'fulfilled' &&
-        volRes.status === 'fulfilled' &&
-        attendanceRes.status === 'fulfilled'
-      ) {
-        privateSettingsLoaded.current = true;
-        setSiteSettingsState((prev) => {
-          const updated: SiteSettings = {
-            ...prev,
-            donationPledges: mergeRemoteFirst(
-              pledgeRes.value.docs.map((d) => d.data() as DonationPledgeRecord),
-              prev.donationPledges || []
-            ),
-            volunteers: mergeRemoteFirst(
-              volRes.value.docs.map((d) => d.data() as VolunteerApplicationRecord),
-              prev.volunteers || []
-            ),
-            attendanceSessions: mergeRemoteFirst(
-              attendanceRes.value.docs.map((d) => d.data() as AttendanceSessionRecord),
-              prev.attendanceSessions || []
-            ),
+      (filtered.participant_private as ParticipantPrivateRecord[]).forEach((rec) => {
+        if (rec?.id) privMap[rec.id] = rec;
+      });
+      setParticipantPrivateMap(privMap);
+
+      const nextLogs = (filtered.audit_logs as AuditLogEntry[]).sort((a, b) =>
+        (b.timestamp || '').localeCompare(a.timestamp || '')
+      );
+      setAuditLogs(nextLogs.slice(0, 200));
+
+      privateSettingsLoaded.current = true;
+      setSiteSettingsState((prev) => ({
+        ...prev,
+        donationPledges: filtered.donation_pledges as DonationPledgeRecord[],
+        volunteers:
+          role === 'super_admin' || role === 'admin'
+            ? (filtered.volunteer_applications as VolunteerApplicationRecord[])
+            : prev.volunteers,
+        attendanceSessions: filtered.attendance_sessions as AttendanceSessionRecord[],
+      }));
+
+      // If user is admin/super_admin, ensure empty public collections in Cloud SQL & Firestore are seeded
+      if (role === 'super_admin' || role === 'admin') {
+        try {
+          const seedSql = (collectionName: string, itemId: string, payload: unknown) => {
+            if (!token) return Promise.resolve();
+            return fetch(`/api/collections/${encodeURIComponent(collectionName)}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ itemId, payload }),
+            }).catch(() => {});
           };
-          localStorage.setItem(STORAGE_KEYS.SITE_SETTINGS, JSON.stringify(updated));
-          return updated;
-        });
+
+          const [
+            sqlBootRes,
+            pubClub,
+            pubSettings,
+            pubSponsors,
+            pubNews,
+            pubEvents,
+            pubProjects,
+            pubGallery,
+            pubDocs,
+            pubPolos,
+          ] = await Promise.allSettled([
+            fetch('/api/bootstrap').then((r) => (r.ok ? r.json() : null)),
+            getDoc(doc(db, 'club_info', 'main')),
+            getDoc(doc(db, 'site_settings', 'main')),
+            getDocs(collection(db, 'sponsors')),
+            getDocs(collection(db, 'news_articles')),
+            getDocs(collection(db, 'events')),
+            getDocs(collection(db, 'projects')),
+            getDocs(collection(db, 'gallery_albums')),
+            getDocs(collection(db, 'transparency_docs')),
+            getDocs(collection(db, 'facility_polos')),
+          ]);
+
+          const sqlPublicCols: Record<string, any[]> =
+            sqlBootRes.status === 'fulfilled' && sqlBootRes.value?.collections
+              ? sqlBootRes.value.collections
+              : {};
+
+          const seedWrites: Promise<unknown>[] = [];
+          const cleanClub = sanitizeForFirestore(normalizeClubInfo(CLUB_INFO));
+          if (pubClub.status === 'fulfilled' && !pubClub.value.exists()) {
+            seedWrites.push(setDoc(doc(db, 'club_info', 'main'), cleanClub));
+          }
+          if (!sqlPublicCols.club_info?.length) {
+            seedWrites.push(seedSql('club_info', 'main', cleanClub));
+          }
+
+          const cleanSettings = sanitizeForFirestore(
+            toPublicSiteSettings(normalizeSiteSettings(DEFAULT_SITE_SETTINGS))
+          );
+          if (pubSettings.status === 'fulfilled' && !pubSettings.value.exists()) {
+            seedWrites.push(setDoc(doc(db, 'site_settings', 'main'), cleanSettings));
+          }
+          if (!sqlPublicCols.site_settings?.length) {
+            seedWrites.push(seedSql('site_settings', 'main', cleanSettings));
+          }
+
+          if (pubSponsors.status === 'fulfilled' && pubSponsors.value.empty) {
+            normalizeSponsors(INITIAL_SPONSORS).forEach((s) => {
+              seedWrites.push(setDoc(doc(db, 'sponsors', s.id), sanitizeForFirestore(s)));
+            });
+          }
+          if (!sqlPublicCols.sponsors?.length) {
+            normalizeSponsors(INITIAL_SPONSORS).forEach((s) => {
+              seedWrites.push(seedSql('sponsors', s.id, sanitizeForFirestore(s)));
+            });
+          }
+
+          if (pubNews.status === 'fulfilled' && pubNews.value.empty) {
+            normalizeNewsArticles(NEWS_ARTICLES).forEach((n) => {
+              seedWrites.push(setDoc(doc(db, 'news_articles', n.id), sanitizeForFirestore(n)));
+            });
+          }
+          if (!sqlPublicCols.news_articles?.length) {
+            normalizeNewsArticles(NEWS_ARTICLES).forEach((n) => {
+              seedWrites.push(seedSql('news_articles', n.id, sanitizeForFirestore(n)));
+            });
+          }
+
+          if (pubEvents.status === 'fulfilled' && pubEvents.value.empty) {
+            normalizeEvents(VITALIZAR_EVENTS).forEach((ev) => {
+              seedWrites.push(setDoc(doc(db, 'events', ev.id), sanitizeForFirestore(ev)));
+            });
+          }
+          if (!sqlPublicCols.events?.length) {
+            normalizeEvents(VITALIZAR_EVENTS).forEach((ev) => {
+              seedWrites.push(seedSql('events', ev.id, sanitizeForFirestore(ev)));
+            });
+          }
+
+          if (pubProjects.status === 'fulfilled' && pubProjects.value.empty) {
+            normalizeProjects(VITALIZAR_PROJECTS).forEach((proj) => {
+              const publicParticipants = (proj.participants || []).map(
+                (pt) => splitParticipantPublicAndPrivate(pt, proj.id).publicParticipant
+              );
+              seedWrites.push(
+                setDoc(
+                  doc(db, 'projects', proj.id),
+                  sanitizeForFirestore({ ...proj, participants: publicParticipants })
+                )
+              );
+            });
+          }
+          if (!sqlPublicCols.projects?.length) {
+            normalizeProjects(VITALIZAR_PROJECTS).forEach((proj) => {
+              const publicParticipants = (proj.participants || []).map(
+                (pt) => splitParticipantPublicAndPrivate(pt, proj.id).publicParticipant
+              );
+              seedWrites.push(
+                seedSql(
+                  'projects',
+                  proj.id,
+                  sanitizeForFirestore({ ...proj, participants: publicParticipants })
+                )
+              );
+            });
+          }
+
+          if (pubGallery.status === 'fulfilled' && pubGallery.value.empty) {
+            normalizeGalleryAlbums(INITIAL_GALLERY_ALBUMS).forEach((alb) => {
+              seedWrites.push(setDoc(doc(db, 'gallery_albums', alb.id), sanitizeForFirestore(alb)));
+            });
+          }
+          if (!sqlPublicCols.gallery_albums?.length) {
+            normalizeGalleryAlbums(INITIAL_GALLERY_ALBUMS).forEach((alb) => {
+              seedWrites.push(seedSql('gallery_albums', alb.id, sanitizeForFirestore(alb)));
+            });
+          }
+
+          if (pubDocs.status === 'fulfilled' && pubDocs.value.empty) {
+            normalizeTransparencyDocs(TRANSPARENCY_DOCUMENTS).forEach((td) => {
+              seedWrites.push(setDoc(doc(db, 'transparency_docs', td.id), sanitizeForFirestore(td)));
+            });
+          }
+          if (!sqlPublicCols.transparency_docs?.length) {
+            normalizeTransparencyDocs(TRANSPARENCY_DOCUMENTS).forEach((td) => {
+              seedWrites.push(seedSql('transparency_docs', td.id, sanitizeForFirestore(td)));
+            });
+          }
+
+          if (pubPolos.status === 'fulfilled' && pubPolos.value.empty) {
+            normalizeFacilityPolos(FACILITY_POLOS).forEach((pl) => {
+              seedWrites.push(setDoc(doc(db, 'facility_polos', pl.id), sanitizeForFirestore(pl)));
+            });
+          }
+          if (!sqlPublicCols.facility_polos?.length) {
+            normalizeFacilityPolos(FACILITY_POLOS).forEach((pl) => {
+              seedWrites.push(seedSql('facility_polos', pl.id, sanitizeForFirestore(pl)));
+            });
+          }
+
+          if (seedWrites.length > 0) {
+            await Promise.allSettled(seedWrites);
+          }
+        } catch {
+          // Ignore background seeding errors
+        }
       }
     });
   }, []);
@@ -1204,6 +1427,20 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  const persistAdminRecordToSql = (collectionName: string, itemId: string, payload: unknown) => {
+    if (!authTokenRef.current) return Promise.resolve(false);
+    return fetch(`/api/collections/${encodeURIComponent(collectionName)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authTokenRef.current}`,
+      },
+      body: JSON.stringify({ itemId, payload }),
+    })
+      .then((r) => r.ok)
+      .catch(() => false);
+  };
+
   const addAuditLog = (action: string, details?: string, adminEmail?: string) => {
     const email = adminEmail || auth.currentUser?.email || 'sistema@vitalizar.org.br';
     const entry = createAuditLogEntry(action, email, details);
@@ -1212,8 +1449,10 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(updated));
       return updated;
     });
+    const sanitized = sanitizeForFirestore(entry);
     if (auth.currentUser) {
-      setDoc(doc(db, 'audit_logs', entry.id), sanitizeForFirestore(entry)).catch(() => {});
+      setDoc(doc(db, 'audit_logs', entry.id), sanitized).catch(() => {});
+      persistAdminRecordToSql('audit_logs', entry.id, sanitized);
     }
   };
 
@@ -1245,8 +1484,10 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(updated));
       return updated;
     });
+    const sanitized = sanitizeForFirestore(entry);
     if (auth.currentUser) {
-      setDoc(doc(db, 'audit_logs', entry.id), sanitizeForFirestore(entry)).catch(() => {});
+      setDoc(doc(db, 'audit_logs', entry.id), sanitized).catch(() => {});
+      persistAdminRecordToSql('audit_logs', entry.id, sanitized);
     }
   };
 
@@ -1256,13 +1497,23 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       localStorage.setItem(STORAGE_KEYS.PARTICIPANT_PRIVATE, JSON.stringify(next));
       return next;
     });
-    await setDoc(doc(db, 'participant_private', record.id), sanitizeForFirestore(record));
+    const sanitized = sanitizeForFirestore(record);
+    await Promise.allSettled([
+      setDoc(doc(db, 'participant_private', record.id), sanitized),
+      persistAdminRecordToSql('participant_private', record.id, sanitized),
+    ]);
   };
 
   // Visitor submissions: the admin only sees them if this write reaches Firestore, so tell the visitor when it fails
   const submitRecord = (collectionName: string, record: { id: string }) => {
+    const sanitized = sanitizeForFirestore(record);
+    fetch(`/api/submissions/${encodeURIComponent(collectionName)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId: record.id, payload: sanitized }),
+    }).catch(() => {});
     Promise.resolve()
-      .then(() => setDoc(doc(db, collectionName, record.id), sanitizeForFirestore(record)))
+      .then(() => setDoc(doc(db, collectionName, record.id), sanitized))
       .catch((err) => {
         console.warn(`Firestore: envio para ${collectionName} falhou:`, err);
         showToast(
@@ -1607,14 +1858,36 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setContactMessages(payload.contactMessages);
       }
 
-      // Publish to Firestore: write each item, delete the ones removed in the panel, and report failures
+      // Publish to Cloud SQL & Firestore: write each item, delete removed ones, and succeed if either backend succeeds
       const writes: Promise<unknown>[] = [];
-      const put = (collectionName: string, id: string, data: unknown) =>
-        writes.push(
-          Promise.resolve().then(() =>
-            setDoc(doc(db, collectionName, id), sanitizeForFirestore(data))
-          )
+      const put = (collectionName: string, id: string, data: unknown) => {
+        const sanitized = sanitizeForFirestore(data);
+        const fsWrite = Promise.resolve().then(() =>
+          setDoc(doc(db, collectionName, id), sanitized)
         );
+        const sqlWrite = authTokenRef.current
+          ? fetch(`/api/collections/${encodeURIComponent(collectionName)}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${authTokenRef.current}`,
+              },
+              body: JSON.stringify({ itemId: id, payload: sanitized }),
+            }).then((r) => {
+              if (!r.ok) throw new Error(`SQL HTTP ${r.status}`);
+              return r.json();
+            })
+          : Promise.reject(new Error('Sem token para Cloud SQL'));
+
+        writes.push(
+          Promise.allSettled([sqlWrite, fsWrite]).then(([sqlRes, fsRes]) => {
+            if (sqlRes.status === 'fulfilled' || fsRes.status === 'fulfilled') {
+              return true;
+            }
+            throw fsRes.reason || sqlRes.reason;
+          })
+        );
+      };
       const syncList = <T extends { id: string }>(
         collectionName: string,
         next: T[],
@@ -1630,36 +1903,72 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const nextIds = new Set(next.map((item) => item.id));
         prev.forEach((item) => {
           if (!nextIds.has(item.id)) {
-            writes.push(Promise.resolve().then(() => deleteDoc(doc(db, collectionName, item.id))));
+            const fsDel = Promise.resolve().then(() =>
+              deleteDoc(doc(db, collectionName, item.id))
+            );
+            const sqlDel = authTokenRef.current
+              ? fetch(
+                  `/api/collections/${encodeURIComponent(collectionName)}/${encodeURIComponent(item.id)}`,
+                  {
+                    method: 'DELETE',
+                    headers: { Authorization: `Bearer ${authTokenRef.current}` },
+                  }
+                ).then((r) => {
+                  if (!r.ok) throw new Error(`SQL HTTP ${r.status}`);
+                  return true;
+                })
+              : Promise.reject(new Error('Sem token para Cloud SQL'));
+            writes.push(
+              Promise.allSettled([sqlDel, fsDel]).then(([sqlRes, fsRes]) => {
+                if (sqlRes.status === 'fulfilled' || fsRes.status === 'fulfilled') {
+                  return true;
+                }
+                throw fsRes.reason || sqlRes.reason;
+              })
+            );
           }
         });
       };
 
-      if (payload.clubInfo !== undefined) {
+      const userRole = currentUserProfile?.role || 'visitante';
+
+      if (payload.clubInfo !== undefined && canRoleWriteCollection(userRole, 'club_info')) {
         put('club_info', 'main', normalizeClubInfo(payload.clubInfo));
       }
       if (payload.siteSettings !== undefined) {
         const safeSettings = normalizeSiteSettings(payload.siteSettings);
-        put('site_settings', 'main', toPublicSiteSettings(safeSettings));
+        const nextPublicSettings = toPublicSiteSettings(safeSettings);
+        const prevPublicSettings = toPublicSiteSettings(siteSettings);
+        if (
+          canRoleWriteCollection(userRole, 'site_settings') &&
+          JSON.stringify(nextPublicSettings) !== JSON.stringify(prevPublicSettings)
+        ) {
+          put('site_settings', 'main', nextPublicSettings);
+        }
         (Object.keys(PRIVATE_SETTINGS_COLLECTIONS) as (keyof typeof PRIVATE_SETTINGS_COLLECTIONS)[]).forEach(
-          (key) =>
-            syncList(
-              PRIVATE_SETTINGS_COLLECTIONS[key],
-              (safeSettings[key] || []) as { id: string }[],
-              (siteSettings[key] || []) as { id: string }[]
-            )
+          (key) => {
+            const colName = PRIVATE_SETTINGS_COLLECTIONS[key];
+            if (canRoleWriteCollection(userRole, colName)) {
+              syncList(
+                colName,
+                (safeSettings[key] || []) as { id: string }[],
+                (siteSettings[key] || []) as { id: string }[],
+                true
+              );
+            }
+          }
         );
       }
-      if (payload.newsArticles !== undefined) {
+      if (payload.newsArticles !== undefined && canRoleWriteCollection(userRole, 'news_articles')) {
         syncList('news_articles', normalizeNewsArticles(payload.newsArticles), newsArticles);
       }
-      if (payload.sponsors !== undefined) {
+      if (payload.sponsors !== undefined && canRoleWriteCollection(userRole, 'sponsors')) {
         syncList('sponsors', normalizeSponsors(payload.sponsors), sponsors);
       }
-      if (payload.events !== undefined) {
+      if (payload.events !== undefined && canRoleWriteCollection(userRole, 'events')) {
         syncList('events', normalizeEvents(payload.events), events);
       }
-      if (payload.projects !== undefined) {
+      if (payload.projects !== undefined && canRoleWriteCollection(userRole, 'projects')) {
         const normalized = normalizeProjects(payload.projects);
         const nextPrivateMap: Record<string, ParticipantPrivateRecord> = {
           ...participantPrivateMap,
@@ -1686,19 +1995,15 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           return { ...proj, participants: publicParticipants };
         });
         setParticipantPrivateMap(nextPrivateMap);
-        localStorage.setItem(
-          STORAGE_KEYS.PARTICIPANT_PRIVATE,
-          JSON.stringify(nextPrivateMap)
-        );
-        syncList('projects', publicProjects, projects);
+        syncList('projects', publicProjects, projects, true);
       }
-      if (payload.galleryAlbums !== undefined) {
+      if (payload.galleryAlbums !== undefined && canRoleWriteCollection(userRole, 'gallery_albums')) {
         syncList('gallery_albums', normalizeGalleryAlbums(payload.galleryAlbums), galleryAlbums);
       }
-      if (payload.transparencyDocs !== undefined) {
+      if (payload.transparencyDocs !== undefined && canRoleWriteCollection(userRole, 'transparency_docs')) {
         syncList('transparency_docs', normalizeTransparencyDocs(payload.transparencyDocs), transparencyDocs);
       }
-      if (payload.facilityPolos !== undefined) {
+      if (payload.facilityPolos !== undefined && canRoleWriteCollection(userRole, 'facility_polos')) {
         syncList('facility_polos', normalizeFacilityPolos(payload.facilityPolos), facilityPolos);
       }
       // Visitor submissions: only write what the admin changed, so demo records never get published
@@ -1721,10 +2026,10 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           (r): r is PromiseRejectedResult => r.status === 'rejected'
         );
         if (failed.length === 0) {
-          showToast(payload.toastMessage || logMessage || 'Alterações salvas no Firestore e publicadas!');
+          showToast(payload.toastMessage || logMessage || 'Alterações salvas no banco de dados e publicadas!');
           return;
         }
-        console.warn('Firestore: falhas ao publicar alterações:', failed.map((f) => f.reason));
+        console.warn('Falhas ao publicar alterações:', failed.map((f) => f.reason));
         const firstReason = failed[0].reason instanceof Error ? failed[0].reason.message : String(failed[0].reason);
         showToast(
           `Salvo apenas neste navegador: ${failed.length} item(ns) NÃO foram publicados no site (${firstReason}). Entre com a conta Google de administrador e salve novamente.`,

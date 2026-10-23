@@ -77,7 +77,7 @@ export const ROLE_SECTIONS: Record<AdminRole, AdminSectionId[]> = {
   ],
   professor: ['visao-geral', 'chamada', 'participantes', 'inscricoes', 'projetos'],
   financeiro: ['visao-geral', 'transparencia', 'comunidade', 'configuracoes'],
-  parceiro: ['visao-geral', 'patrocinadores', 'transparencia', 'comunidade', 'projetos'],
+  parceiro: ['visao-geral', 'patrocinadores', 'transparencia', 'comunidade'],
   apoiador: ['visao-geral', 'inscricoes', 'transparencia', 'comunidade'],
   visitante: ['visao-geral', 'inscricoes', 'comunidade'],
 };
@@ -104,6 +104,16 @@ export const DATA_CLASSIFICATION: Record<string, DataClassificationLevel> = {
   donation_pledges: 'sensível',
   volunteer_applications: 'sensível',
 };
+
+export function isStaffRole(role: AdminRole): boolean {
+  return (
+    role === 'super_admin' ||
+    role === 'admin' ||
+    role === 'editor' ||
+    role === 'professor' ||
+    role === 'financeiro'
+  );
+}
 
 export function canAccessSection(role: AdminRole, section: AdminSectionId): boolean {
   return (ROLE_SECTIONS[role] || []).includes(section);
@@ -132,6 +142,90 @@ export function canManageProject(profile: AdminUserProfile | null, projectId: st
   }
   if (profile.role === 'professor') {
     return (profile.projectIds || []).includes(projectId);
+  }
+  return false;
+}
+
+export function getReadablePrivateCollections(role: AdminRole): string[] {
+  switch (role) {
+    case 'super_admin':
+    case 'admin':
+      return [
+        'rsvps',
+        'contact_messages',
+        'scout_inquiries',
+        'donation_pledges',
+        'volunteer_applications',
+        'attendance_sessions',
+        'participant_private',
+        'audit_logs',
+      ];
+    case 'professor':
+      return ['rsvps', 'attendance_sessions', 'participant_private'];
+    case 'financeiro':
+      return ['donation_pledges'];
+    case 'parceiro':
+      return ['scout_inquiries'];
+    case 'apoiador':
+    case 'visitante':
+      return ['rsvps', 'donation_pledges'];
+    case 'editor':
+    default:
+      return [];
+  }
+}
+
+export function canRoleWriteCollection(role: AdminRole, collectionName: string): boolean {
+  if (role === 'super_admin' || role === 'admin') return true;
+  if (collectionName === 'audit_logs') return true;
+
+  switch (role) {
+    case 'editor':
+      return [
+        'club_info',
+        'site_settings',
+        'news_articles',
+        'sponsors',
+        'events',
+        'projects',
+        'gallery_albums',
+        'facility_polos',
+      ].includes(collectionName);
+    case 'professor':
+      return [
+        'projects',
+        'participant_private',
+        'attendance_sessions',
+        'rsvps',
+      ].includes(collectionName);
+    case 'financeiro':
+      return [
+        'transparency_docs',
+        'site_settings',
+        'donation_pledges',
+        'admins',
+      ].includes(collectionName);
+    case 'parceiro':
+      return ['sponsors', 'scout_inquiries'].includes(collectionName);
+    case 'apoiador':
+    case 'visitante':
+      return ['rsvps', 'donation_pledges', 'admins'].includes(collectionName);
+    default:
+      return false;
+  }
+}
+
+export function canRoleDeleteFromCollection(role: AdminRole, collectionName: string): boolean {
+  if (collectionName === 'audit_logs') return false;
+  if (role === 'super_admin') return true;
+  if (role === 'admin') return collectionName !== 'admins';
+  if (role === 'editor') {
+    return ['news_articles', 'sponsors', 'events', 'gallery_albums', 'facility_polos'].includes(
+      collectionName
+    );
+  }
+  if (role === 'financeiro') {
+    return collectionName === 'transparency_docs';
   }
   return false;
 }
@@ -225,8 +319,8 @@ export function mergeParticipantWithPrivate(
 }
 
 export function resolveProjectIdFromRsvp(
-  rsvp: EventRsvpRecord,
-  projects: VitalizarProject[]
+  rsvp: Pick<EventRsvpRecord, 'projectId' | 'eventId' | 'eventTitle'>,
+  projects: Pick<VitalizarProject, 'id' | 'name'>[] = []
 ): string | null {
   if (rsvp.projectId) return rsvp.projectId;
   if (rsvp.eventId?.startsWith('inscricao-')) {
@@ -240,3 +334,86 @@ export function resolveProjectIdFromRsvp(
   );
   return matched ? matched.id : null;
 }
+
+export function filterPrivateCollectionsForUser(
+  rawCollections: Record<string, any[]>,
+  profile: AdminUserProfile | null | undefined,
+  projects: Pick<VitalizarProject, 'id' | 'name'>[] = []
+): Record<string, any[]> {
+  const empty: Record<string, any[]> = {
+    rsvps: [],
+    contact_messages: [],
+    scout_inquiries: [],
+    donation_pledges: [],
+    volunteer_applications: [],
+    attendance_sessions: [],
+    participant_private: [],
+    audit_logs: [],
+  };
+  if (!profile || !profile.ativo) return empty;
+
+  const role = profile.role;
+  if (role === 'super_admin' || role === 'admin') {
+    return {
+      rsvps: rawCollections.rsvps || [],
+      contact_messages: rawCollections.contact_messages || [],
+      scout_inquiries: rawCollections.scout_inquiries || [],
+      donation_pledges: rawCollections.donation_pledges || [],
+      volunteer_applications: rawCollections.volunteer_applications || [],
+      attendance_sessions: rawCollections.attendance_sessions || [],
+      participant_private: rawCollections.participant_private || [],
+      audit_logs: rawCollections.audit_logs || [],
+    };
+  }
+
+  if (role === 'professor') {
+    const allowedIds = new Set(profile.projectIds || []);
+    return {
+      ...empty,
+      rsvps: (rawCollections.rsvps || []).filter((r) => {
+        const pid = resolveProjectIdFromRsvp(r, projects);
+        return Boolean(pid && allowedIds.has(pid));
+      }),
+      attendance_sessions: (rawCollections.attendance_sessions || []).filter((s) =>
+        Boolean(s?.projectId && allowedIds.has(s.projectId))
+      ),
+      participant_private: (rawCollections.participant_private || []).filter((p) =>
+        Boolean(p?.projectId && allowedIds.has(p.projectId))
+      ),
+    };
+  }
+
+  if (role === 'financeiro') {
+    return {
+      ...empty,
+      donation_pledges: rawCollections.donation_pledges || [],
+    };
+  }
+
+  if (role === 'parceiro') {
+    return {
+      ...empty,
+      scout_inquiries: rawCollections.scout_inquiries || [],
+    };
+  }
+
+  if (role === 'apoiador' || role === 'visitante') {
+    const emailLower = (profile.email || '').trim().toLowerCase();
+    return {
+      ...empty,
+      rsvps: (rawCollections.rsvps || []).filter(
+        (r) =>
+          (r?.userId && r.userId === profile.uid) ||
+          (r?.email && String(r.email).trim().toLowerCase() === emailLower)
+      ),
+      donation_pledges: (rawCollections.donation_pledges || []).filter(
+        (d) =>
+          (d?.userId && d.userId === profile.uid) ||
+          (d?.donorEmail && String(d.donorEmail).trim().toLowerCase() === emailLower)
+      ),
+    };
+  }
+
+  return empty;
+}
+

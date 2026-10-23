@@ -384,26 +384,19 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
     },
     {
       id: 'contato',
-      header: 'Contato (Sensível LGPD)',
-      render: (r) => (
-        <div className="space-y-1">
-          <div>
-            <CampoSensivelMascara
-              value={r.phone}
-              type="phone"
-              itemLabel={r.studentName || r.name}
-              collection="rsvps"
-              itemId={r.id}
-              onRevealAudit={(p) =>
-                recordAuditEvent({ ...p, role: profile.role })
-              }
-            />
+      header: isCommunityUser ? 'Contato Registrado' : 'Contato (Sensível LGPD)',
+      render: (r) =>
+        isCommunityUser ? (
+          <div className="space-y-0.5 text-xs text-slate-600 dark:text-slate-300 font-mono">
+            <div>{r.phone}</div>
+            {r.email && <div className="text-[11px] text-slate-500">{r.email}</div>}
           </div>
-          {r.email && (
+        ) : (
+          <div className="space-y-1">
             <div>
               <CampoSensivelMascara
-                value={r.email}
-                type="email"
+                value={r.phone}
+                type="phone"
                 itemLabel={r.studentName || r.name}
                 collection="rsvps"
                 itemId={r.id}
@@ -412,9 +405,22 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
                 }
               />
             </div>
-          )}
-        </div>
-      ),
+            {r.email && (
+              <div>
+                <CampoSensivelMascara
+                  value={r.email}
+                  type="email"
+                  itemLabel={r.studentName || r.name}
+                  collection="rsvps"
+                  itemId={r.id}
+                  onRevealAudit={(p) =>
+                    recordAuditEvent({ ...p, role: profile.role })
+                  }
+                />
+              </div>
+            )}
+          </div>
+        ),
     },
     {
       id: 'status',
@@ -557,7 +563,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
               <option value="recusada">Recusadas</option>
             </select>
 
-            <SeloSensivel level="sensível" />
+            {!isCommunityUser && <SeloSensivel level="sensível" />}
           </div>
         }
         headerActions={

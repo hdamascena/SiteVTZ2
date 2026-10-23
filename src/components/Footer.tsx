@@ -44,11 +44,11 @@ export const Footer: React.FC<FooterProps> = ({
                 className="w-12 h-12 object-contain shrink-0"
               />
               <div>
-                <h3 className="text-lg font-extrabold tracking-tight text-white">
-                  VITALIZAR
+                <h3 className="text-lg font-extrabold tracking-tight text-white uppercase">
+                  {clubInfo.shortName || 'VITALIZAR'}
                 </h3>
                 <p className="text-xs text-sky-400 font-medium">
-                  Associação Esportiva Vitalizar
+                  {clubInfo.fullName}
                 </p>
               </div>
             </div>
@@ -187,7 +187,7 @@ export const Footer: React.FC<FooterProps> = ({
               </>
             )}
             <span aria-hidden="true">·</span>
-            <span>© {new Date().getFullYear()} Associação Esportiva Vitalizar</span>
+            <span>© {new Date().getFullYear()} {clubInfo.fullName}</span>
           </div>
 
           <button

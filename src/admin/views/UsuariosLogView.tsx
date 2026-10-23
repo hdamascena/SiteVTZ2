@@ -225,7 +225,7 @@ export const UsuariosLogView: React.FC<UsuariosLogViewProps> = ({
                 type="search"
                 value={logPersonFilter}
                 onChange={(e) => setLogPersonFilter(e.target.value)}
-                placeholder="Ex.: higor.rock2011@gmail.com"
+                placeholder="Ex.: usuario@exemplo.com"
                 className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
               />
             </div>
@@ -666,7 +666,7 @@ export const UsuariosLogView: React.FC<UsuariosLogViewProps> = ({
           <CampoTexto
             label="Nome Completo"
             required
-            placeholder="Ex.: Prof. Marcos Silva"
+            placeholder="Nome e sobrenome"
             value={newInvite.nome}
             onChange={(v) => setNewInvite({ ...newInvite, nome: v })}
           />

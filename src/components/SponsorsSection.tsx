@@ -73,9 +73,11 @@ export const SponsorsSection: React.FC<SponsorsSectionProps> = ({
   title = 'Patrocinadores & Parceiros Oficiais',
   subtitle = 'Empresas e instituições que acreditam no impacto transformador do esporte e da cidadania em Cariacica/ES.',
 }) => {
-  const { sponsors } = useClubData();
+  const { sponsors, clubInfo } = useClubData();
 
-  const activeSponsors = sponsors.filter((s) => s.active);
+  const activeSponsors = [...sponsors]
+    .filter((s) => s.active !== false)
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
 
   // Group by tier
   const masterSponsors = activeSponsors.filter((s) => s.tier === 'master');
@@ -253,30 +255,52 @@ export const SponsorsSection: React.FC<SponsorsSectionProps> = ({
               {[...bronzeSponsors, ...apoioSponsors].map((spon) => (
                 <div
                   key={spon.id}
-                  className="col-span-12 sm:col-span-6 lg:col-span-3 bg-white p-4 rounded-xl border border-slate-200 hover:border-slate-300 shadow-2xs transition-all flex items-center gap-3.5"
+                  className="col-span-12 sm:col-span-6 lg:col-span-3 bg-white p-4 rounded-xl border border-slate-200 hover:border-slate-300 shadow-2xs transition-all flex flex-col justify-between gap-2.5"
                 >
-                  <div className="w-12 h-12 rounded-lg bg-slate-50 p-1 flex items-center justify-center border border-slate-100 shrink-0 overflow-hidden">
-                    <img
-                      src={spon.logoUrl}
-                      alt={`Logo ${spon.name}`}
-                      className="w-full h-full object-cover rounded-md"
-                      onError={(e) => {
-                        e.currentTarget.src =
-                          'https://images.unsplash.com/photo-1542838132-92c53300491e?w=400&q=80';
-                      }}
-                    />
+                  <div>
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-12 h-12 rounded-lg bg-slate-50 p-1 flex items-center justify-center border border-slate-100 shrink-0 overflow-hidden">
+                        <img
+                          src={spon.logoUrl}
+                          alt={`Logo ${spon.name}`}
+                          className="w-full h-full object-cover rounded-md"
+                          onError={(e) => {
+                            e.currentTarget.src =
+                              'https://images.unsplash.com/photo-1542838132-92c53300491e?w=400&q=80';
+                          }}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[9px] font-black uppercase text-slate-500 block">
+                          {spon.tierLabel}
+                        </span>
+                        <h5 className="text-xs font-bold text-slate-900 truncate" title={spon.name}>
+                          {spon.name}
+                        </h5>
+                        <span className="text-[10px] text-slate-400 block truncate">
+                          {spon.category}
+                        </span>
+                      </div>
+                    </div>
+                    {spon.description && (
+                      <p className="text-[11px] text-slate-500 mt-2.5 line-clamp-2 leading-relaxed">
+                        {spon.description}
+                      </p>
+                    )}
                   </div>
-                  <div className="min-w-0">
-                    <span className="text-[9px] font-black uppercase text-slate-500 block">
-                      {spon.tierLabel}
-                    </span>
-                    <h5 className="text-xs font-bold text-slate-900 truncate" title={spon.name}>
-                      {spon.name}
-                    </h5>
-                    <span className="text-[10px] text-slate-400 block truncate">
-                      {spon.category}
-                    </span>
-                  </div>
+                  {spon.websiteUrl && (
+                    <div className="pt-2 border-t border-slate-100 flex justify-end">
+                      <a
+                        href={spon.websiteUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#0284c7] hover:underline"
+                      >
+                        <span>Visitar site</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -287,7 +311,7 @@ export const SponsorsSection: React.FC<SponsorsSectionProps> = ({
         <div className="mt-12 bg-[#0a1e36] text-white p-6 sm:p-8 rounded-3xl border border-sky-950 flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl">
           <div className="space-y-1.5 text-center md:text-left">
             <span className="text-[11px] font-bold text-[#38bdf8] uppercase tracking-wider">
-              Associação Esportiva Vitalizar • CNPJ 63.083.068/0001-00
+              {clubInfo.fullName} • CNPJ {clubInfo.cnpj}
             </span>
             <h4 className="text-lg sm:text-xl font-black">
               Sua empresa também pode transformar vidas através do esporte

@@ -226,17 +226,31 @@ export async function verifyFirebaseAdminAccess(
   }
 }
 
+async function getAuthHeader(): Promise<Record<string, string>> {
+  const token = await auth.currentUser?.getIdToken().catch(() => null);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export async function promoteVisitorToSupporter(uid: string): Promise<boolean> {
   try {
     const adminRef = doc(db, 'admins', uid);
-    const snap = await getDoc(adminRef);
-    if (!snap.exists()) return false;
-    const data = snap.data();
-    if (data.role !== 'visitante') return true;
-    await setDoc(adminRef, {
-      ...data,
+    const snap = await getDoc(adminRef).catch(() => null);
+    const data = snap && snap.exists() ? snap.data() : null;
+    if (data && data.role !== 'visitante') return true;
+    const updated = {
+      ...(data || {}),
+      uid,
       role: 'apoiador',
-    });
+    };
+    const headers = await getAuthHeader();
+    await Promise.allSettled([
+      data ? setDoc(adminRef, { ...data, role: 'apoiador' }) : Promise.resolve(),
+      fetch('/api/collections/admins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({ itemId: uid, payload: updated }),
+      }),
+    ]);
     return true;
   } catch {
     return false;
@@ -247,49 +261,93 @@ export async function fetchAllAdminsAndInvites(): Promise<{
   admins: AdminUserProfile[];
   invites: AdminInviteRecord[];
 }> {
-  const [adminsRes, invitesRes] = await Promise.allSettled([
+  const headers = await getAuthHeader();
+  const [sqlRes, adminsRes, invitesRes] = await Promise.allSettled([
+    fetch('/api/users', { headers }).then((r) => (r.ok ? r.json() : null)),
     getDocs(collection(db, 'admins')),
     getDocs(collection(db, 'admin_invites')),
   ]);
 
-  const admins: AdminUserProfile[] =
-    adminsRes.status === 'fulfilled'
-      ? adminsRes.value.docs.map((d) => {
-          const raw = d.data();
-          return {
-            uid: d.id,
-            email: raw.email || '',
-            nome: raw.nome || raw.email || d.id,
-            role: (raw.role as AdminRole) || 'visitante',
-            projectIds: Array.isArray(raw.projectIds) ? raw.projectIds : [],
-            ativo: raw.ativo !== false,
-            criadoEm: raw.criadoEm || '',
-            criadoPor: raw.criadoPor || '',
-          };
-        })
-      : [];
+  const adminMap = new Map<string, AdminUserProfile>();
 
-  const invites: AdminInviteRecord[] =
-    invitesRes.status === 'fulfilled'
-      ? invitesRes.value.docs.map((d) => {
-          const raw = d.data();
-          return {
-            email: d.id,
-            nome: raw.nome || d.id,
-            role: (raw.role as AdminRole) || 'professor',
-            projectIds: Array.isArray(raw.projectIds) ? raw.projectIds : [],
-            criadoEm: raw.criadoEm || '',
-            criadoPor: raw.criadoPor || '',
-          };
-        })
-      : [];
+  if (adminsRes.status === 'fulfilled') {
+    adminsRes.value.docs.forEach((d) => {
+      const raw = d.data();
+      adminMap.set(d.id, {
+        uid: d.id,
+        email: raw.email || '',
+        nome: raw.nome || raw.email || d.id,
+        role: (raw.role as AdminRole) || 'visitante',
+        projectIds: Array.isArray(raw.projectIds) ? raw.projectIds : [],
+        ativo: raw.ativo !== false,
+        criadoEm: raw.criadoEm || '',
+        criadoPor: raw.criadoPor || '',
+      });
+    });
+  }
 
-  return { admins, invites };
+  if (sqlRes.status === 'fulfilled' && sqlRes.value) {
+    const sqlAdmins: any[] = Array.isArray(sqlRes.value.admins) ? sqlRes.value.admins : [];
+    sqlAdmins.forEach((raw) => {
+      if (raw && raw.uid) {
+        adminMap.set(raw.uid, {
+          uid: String(raw.uid),
+          email: String(raw.email || ''),
+          nome: String(raw.nome || raw.email || raw.uid),
+          role: (raw.role as AdminRole) || 'visitante',
+          projectIds: Array.isArray(raw.projectIds) ? raw.projectIds : [],
+          ativo: raw.ativo !== false,
+          criadoEm: String(raw.criadoEm || ''),
+          criadoPor: String(raw.criadoPor || ''),
+        });
+      }
+    });
+  }
+
+  const inviteMap = new Map<string, AdminInviteRecord>();
+
+  if (invitesRes.status === 'fulfilled') {
+    invitesRes.value.docs.forEach((d) => {
+      const raw = d.data();
+      const emailKey = (raw.email || d.id).trim().toLowerCase();
+      inviteMap.set(emailKey, {
+        email: emailKey,
+        nome: raw.nome || emailKey,
+        role: (raw.role as AdminRole) || 'professor',
+        projectIds: Array.isArray(raw.projectIds) ? raw.projectIds : [],
+        criadoEm: raw.criadoEm || '',
+        criadoPor: raw.criadoPor || '',
+      });
+    });
+  }
+
+  if (sqlRes.status === 'fulfilled' && sqlRes.value) {
+    const sqlInvites: any[] = Array.isArray(sqlRes.value.invites) ? sqlRes.value.invites : [];
+    sqlInvites.forEach((raw) => {
+      if (raw && raw.email) {
+        const emailKey = String(raw.email).trim().toLowerCase();
+        inviteMap.set(emailKey, {
+          email: emailKey,
+          nome: String(raw.nome || emailKey),
+          role: (raw.role as AdminRole) || 'professor',
+          projectIds: Array.isArray(raw.projectIds) ? raw.projectIds : [],
+          criadoEm: String(raw.criadoEm || ''),
+          criadoPor: String(raw.criadoPor || ''),
+        });
+      }
+    });
+  }
+
+  return {
+    admins: Array.from(adminMap.values()),
+    invites: Array.from(inviteMap.values()),
+  };
 }
 
 export async function saveAdminProfile(profile: AdminUserProfile): Promise<void> {
   const adminRef = doc(db, 'admins', profile.uid);
-  await setDoc(adminRef, {
+  const payload = {
+    uid: profile.uid,
     email: profile.email.trim().toLowerCase(),
     nome: profile.nome.trim() || profile.email,
     role: profile.role,
@@ -297,25 +355,51 @@ export async function saveAdminProfile(profile: AdminUserProfile): Promise<void>
     ativo: profile.ativo,
     criadoEm: profile.criadoEm || new Date().toISOString(),
     criadoPor: profile.criadoPor || 'admin',
-  });
+  };
+  const headers = await getAuthHeader();
+  const { uid: _uid, ...fsData } = payload;
+  await Promise.allSettled([
+    setDoc(adminRef, fsData),
+    fetch('/api/collections/admins', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ itemId: profile.uid, payload }),
+    }),
+  ]);
 }
 
 export async function saveAdminInvite(invite: AdminInviteRecord): Promise<void> {
   const normalizedEmail = invite.email.trim().toLowerCase();
   const inviteRef = doc(db, 'admin_invites', normalizedEmail);
-  await setDoc(inviteRef, {
+  const payload = {
     email: normalizedEmail,
     nome: invite.nome.trim() || normalizedEmail,
     role: invite.role,
     projectIds: Array.isArray(invite.projectIds) ? invite.projectIds : [],
     criadoEm: invite.criadoEm || new Date().toISOString(),
     criadoPor: invite.criadoPor || 'admin',
-  });
+  };
+  const headers = await getAuthHeader();
+  await Promise.allSettled([
+    setDoc(inviteRef, payload),
+    fetch('/api/collections/admin_invites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ itemId: normalizedEmail, payload }),
+    }),
+  ]);
 }
 
 export async function deleteAdminInvite(email: string): Promise<void> {
   const normalizedEmail = email.trim().toLowerCase();
-  await deleteDoc(doc(db, 'admin_invites', normalizedEmail));
+  const headers = await getAuthHeader();
+  await Promise.allSettled([
+    deleteDoc(doc(db, 'admin_invites', normalizedEmail)),
+    fetch(`/api/collections/admin_invites/${encodeURIComponent(normalizedEmail)}`, {
+      method: 'DELETE',
+      headers,
+    }),
+  ]);
 }
 
 export async function loginWithGoogleAdmin(): Promise<User | null> {

@@ -27,8 +27,11 @@ export const UltimasNoticias: React.FC<UltimasNoticiasProps> = ({
   const { newsArticles } = useClubData();
   const [selectedArticle, setSelectedArticle] = useState<NewsArticle | null>(null);
 
-  const featuredArticle = newsArticles[0];
-  const sideArticles = newsArticles.slice(1, 4);
+  const publishedArticles = newsArticles.filter(
+    (art) => (art.status || 'publicado') !== 'rascunho'
+  );
+  const featuredArticle = publishedArticles[0];
+  const sideArticles = publishedArticles.slice(1, 4);
 
   if (!featuredArticle) return null;
 

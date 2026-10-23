@@ -35,7 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAdmin,
   activePageId = 'home',
 }) => {
-  const { currentUserProfile } = useClubData();
+  const { currentUserProfile, clubInfo } = useClubData();
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -73,8 +73,8 @@ export const Header: React.FC<HeaderProps> = ({
             alt="Brasão Associação Esportiva Vitalizar"
             className="w-20 h-20 sm:w-24 sm:h-24 object-contain translate-y-2.5 sm:translate-y-3 pt-0 -mt-[21px] -ml-[13px] drop-shadow-[0_10px_20px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-105 shrink-0"
           />
-          <span className="font-display text-white font-extrabold text-xl sm:text-2xl tracking-tight whitespace-nowrap shrink-0">
-            VITALIZAR
+          <span className="font-display text-white font-extrabold text-xl sm:text-2xl tracking-tight whitespace-nowrap shrink-0 uppercase">
+            {clubInfo.shortName || 'VITALIZAR'}
           </span>
         </button>
 
@@ -119,13 +119,18 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               onClick={onOpenAdmin}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-sky-100 bg-white/10 hover:bg-white/20 hover:text-white rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
-              title="Entrar / Painel Administrativo"
-              aria-label="Entrar / Painel Administrativo"
+              title="Entrar / Área do Usuário"
+              aria-label="Entrar / Área do Usuário"
             >
               <Lock className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
               <span>
                 {currentUserProfile
-                  ? `Painel (${currentUserProfile.nome.split(' ')[0]})`
+                  ? `${
+                      currentUserProfile.role === 'visitante' ||
+                      currentUserProfile.role === 'apoiador'
+                        ? 'Minha Área'
+                        : 'Painel'
+                    } (${currentUserProfile.nome.split(' ')[0]})`
                   : 'Entrar'}
               </span>
             </button>
@@ -169,8 +174,8 @@ export const Header: React.FC<HeaderProps> = ({
                     alt="Brasão Vitalizar"
                     className="w-11 h-11 object-contain shrink-0"
                   />
-                  <span className="font-display font-extrabold text-lg text-white">
-                    VITALIZAR
+                  <span className="font-display font-extrabold text-lg text-white uppercase">
+                    {clubInfo.shortName || 'VITALIZAR'}
                   </span>
                 </div>
                 <button
@@ -218,16 +223,25 @@ export const Header: React.FC<HeaderProps> = ({
                     className="w-full py-2.5 px-4 bg-white/10 hover:bg-white/15 text-sky-100 font-semibold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
                   >
                     <Lock className="w-3.5 h-3.5 text-sky-400" />
-                    <span>Painel Administrativo</span>
+                    <span>
+                      {currentUserProfile
+                        ? `${
+                            currentUserProfile.role === 'visitante' ||
+                            currentUserProfile.role === 'apoiador'
+                              ? 'Minha Área'
+                              : 'Painel'
+                          } (${currentUserProfile.nome.split(' ')[0]})`
+                        : 'Entrar / Minha Área'}
+                    </span>
                   </button>
                 )}
               </div>
             </div>
 
             <div className="pt-6 border-t border-sky-900/60 text-xs text-sky-300/80 space-y-1">
-              <p className="font-semibold text-white">Associação Esportiva Vitalizar</p>
-              <p>Rio Marinho · Cariacica/ES</p>
-              <p>(27) 9774-0773 · (27) 9297-9056</p>
+              <p className="font-semibold text-white">{clubInfo.fullName}</p>
+              <p>{clubInfo.address} · {clubInfo.municipality}</p>
+              <p>{clubInfo.phones.join(' · ')}</p>
             </div>
           </div>
         </div>

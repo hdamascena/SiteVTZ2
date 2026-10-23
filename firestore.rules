@@ -405,7 +405,7 @@ service cloud.firestore {
 
     match /site_settings/{docId} {
       allow read: if true;
-      allow create, update: if hasRole(['super_admin', 'admin', 'editor']) && validSiteSettings();
+      allow create, update: if hasRole(['super_admin', 'admin', 'editor', 'financeiro']) && validSiteSettings();
       allow delete: if hasRole(['super_admin', 'admin']);
     }
 
@@ -441,7 +441,7 @@ service cloud.firestore {
 
     match /transparency_docs/{docId} {
       allow read: if true;
-      allow create, update: if hasRole(['super_admin', 'admin']) && validTransparencyDoc(docId);
+      allow create, update: if hasRole(['super_admin', 'admin', 'financeiro']) && validTransparencyDoc(docId);
       allow delete: if hasRole(['super_admin', 'admin']);
     }
 

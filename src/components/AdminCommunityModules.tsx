@@ -300,7 +300,7 @@ export const AdminCommunityModules: React.FC<AdminCommunityModulesProps> = ({
                       },
                     });
                   }}
-                  placeholder="63.083.068/0001-00"
+                  placeholder="00.000.000/0001-00"
                   className="w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl"
                 />
               </div>

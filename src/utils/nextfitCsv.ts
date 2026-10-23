@@ -10,12 +10,8 @@ import type {
  */
 export const NEXTFIT_SAMPLE_CSV_CONTENT = [
   'Codigo NextFit;Nome do Atleta;Data de Nascimento;Idade;Situacao Matricula;Modalidade / Turma;Plano / Contrato;Posicao;Altura (m);Peso (kg);Escola;Observacoes Avaliacao Fisica',
-  'NF-1041;Lucas Gabriel Ferreira;14/03/2011;15;Ativo;Futebol de Campo Sub-15;Bolsa Atleta Vitalizar;Meio-Campista;1,71;61kg;EMEF Cariacica;Excelente resistência aeróbica e visão de jogo',
-  'NF-1042;Pedro Henrique Santos;22/07/2012;14;Ativo;Futsal Iniciação Sub-15;Projeto Social Manhã;Atacante / Ala;1,66;56kg;EEEFM Rio Marinho;Velocidade de transição e drible curto',
-  'NF-1043;Cauã Oliveira Martins;09/11/2013;12;Ativo;Futsal Base Sub-13;Projeto Social Tarde;Zagueiro / Fixo;1,60;51kg;EMEF João Pedro;Boa impulsão e leitura defensiva',
-  'NF-1044;Matheus Ribeiro Costa;03/05/2010;16;Ativo;Futebol de Campo Sub-17;Bolsa Atleta Vitalizar;Goleiro;1,82;73kg;EEEFM Presidente Médici;Envergadura de 1,88m e reflexo rápido',
-  'NF-1045;Davi Luiz Almeida;19/01/2014;12;Trancado;Escolinha Comunitária Sub-13;Projeto Social Manhã;Lateral Direito;1,55;47kg;EMEF Rio Marinho;Matrícula trancada temporariamente para recuperação muscular',
-  'NF-1046;Enzo Miguel Rocha;28/08/2011;15;Ativo;Voleibol & Iniciação Esportiva;Saúde e Movimento;Meio-Campista;1,74;63kg;EMEF Cariacica;Ótima coordenação motora e liderança em quadra',
+  'NF-1001;Participante Exemplo 1;01/01/2012;14;Ativo;Futsal Iniciação Sub-15;Projeto Social Manhã;Meio-Campista;1,65;55kg;Unidade Escolar;Observação de avaliação física',
+  'NF-1002;Participante Exemplo 2;01/01/2013;13;Ativo;Futsal Base Sub-13;Projeto Social Tarde;Defensor;1,60;50kg;Unidade Escolar;Observação de avaliação física',
 ].join('\r\n');
 
 const DEFAULT_AVATARS = [

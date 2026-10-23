@@ -615,12 +615,14 @@ export const ComunidadeView: React.FC<ComunidadeViewProps> = ({
                   : 'text-slate-600 dark:text-slate-400'
               }`}
             >
-              Doações PIX & Apoiadores ({visiblePledges.length})
+              {isCommunityRole
+                ? `Minhas Doações PIX (${visiblePledges.length})`
+                : `Doações PIX & Apoiadores (${visiblePledges.length})`}
             </button>
           )}
         </div>
 
-        <SeloSensivel level="sensível" />
+        {!isCommunityRole && <SeloSensivel level="sensível" />}
       </div>
 
       {activeTab === 'mensagens' && (

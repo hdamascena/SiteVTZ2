@@ -1,4 +1,32 @@
 import type { AttachedFile } from '../types/index.ts';
+import { auth } from '../firebase.ts';
+
+async function uploadToSqlIfAuthenticated(params: {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  dataUrl: string;
+}): Promise<string> {
+  try {
+    const user = auth.currentUser;
+    if (!user) return params.dataUrl;
+    const token = await user.getIdToken();
+    const res = await fetch('/api/files', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) return params.dataUrl;
+    const data = await res.json();
+    return typeof data?.url === 'string' && data.url ? data.url : params.dataUrl;
+  } catch {
+    return params.dataUrl;
+  }
+}
 
 /**
  * Formats byte count into a human-readable string (e.g. 245 KB, 1.4 MB)
@@ -30,15 +58,15 @@ export function inferFileTypeBadge(fileName: string, mimeType: string): string {
 }
 
 /**
- * Compresses and resizes an uploaded image file via HTML5 Canvas so it can be
- * stored reliably in localStorage without hitting browser quota limits.
+ * Compresses and resizes an uploaded image file via HTML5 Canvas and stores it in Cloud SQL
+ * when authenticated so records stay below Firestore's 1 MB document limit.
  */
-export function processImageUpload(
+export async function processImageUpload(
   file: File,
   maxWidth = 1280,
   quality = 0.82
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
+  const rawDataUrl = await new Promise<string>((resolve, reject) => {
     if (!file.type.startsWith('image/')) {
       reject(new Error('O arquivo selecionado não é uma imagem válida.'));
       return;
@@ -93,32 +121,49 @@ export function processImageUpload(
     };
     reader.readAsDataURL(file);
   });
+
+  const fileId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  return uploadToSqlIfAuthenticated({
+    id: fileId,
+    fileName: file.name || `${fileId}.jpg`,
+    mimeType: file.type || 'image/jpeg',
+    sizeBytes: file.size || rawDataUrl.length,
+    dataUrl: rawDataUrl,
+  });
 }
 
 /**
  * Processes any uploaded document or media file into an AttachedFile record.
- * Images are automatically compressed; documents up to 4MB are encoded as Data URLs.
+ * Images are automatically compressed; documents up to 15MB are stored in Cloud SQL.
  */
 export async function processAttachmentUpload(file: File): Promise<AttachedFile> {
-  const MAX_RAW_SIZE = 4.5 * 1024 * 1024; // 4.5 MB safety guard for localStorage
+  const MAX_RAW_SIZE = 15 * 1024 * 1024; // 15 MB limit with Cloud SQL storage
   if (file.size > MAX_RAW_SIZE && !file.type.startsWith('image/')) {
-    throw new Error('O arquivo excede o limite de 4,5 MB para armazenamento local.');
+    throw new Error('O arquivo excede o limite máximo de 15 MB.');
   }
 
+  const fileId = `file-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   let dataUrl: string;
   if (file.type.startsWith('image/')) {
     dataUrl = await processImageUpload(file, 1280, 0.82);
   } else {
-    dataUrl = await new Promise<string>((resolve, reject) => {
+    const rawDataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onerror = () => reject(new Error('Falha ao ler o arquivo anexado.'));
       reader.onload = (e) => resolve((e.target?.result as string) || '');
       reader.readAsDataURL(file);
     });
+    dataUrl = await uploadToSqlIfAuthenticated({
+      id: fileId,
+      fileName: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      sizeBytes: file.size,
+      dataUrl: rawDataUrl,
+    });
   }
 
   return {
-    id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    id: fileId,
     name: file.name,
     size: formatFileSize(file.size),
     type: inferFileTypeBadge(file.name, file.type),
@@ -300,9 +345,8 @@ export function parseTransparencyFinancialCsv(
 
 export const ENROLLMENT_SAMPLE_CSV = [
   'Nome do Aluno;Idade;Responsavel Legal;Telefone / WhatsApp;E-mail;Turma / Turno',
-  'Gabriel Souza Lima;11;Maria Souza Lima;(27) 99811-2233;maria.lima@email.com;Manhã (08h00 às 10h30)',
-  'Helena Costa Alves;14;Carlos Eduardo Alves;(27) 99744-5566;carlos.alves@email.com;Tarde (14h00 às 16h30)',
-  'Arthur Mendes Rocha;9;Juliana Mendes;(27) 99622-8899;juliana.mendes@email.com;Manhã (08h00 às 10h30)',
+  'Participante Exemplo 1;12;Responsável Exemplo 1;(00) 00000-0000;exemplo1@dominio.com;Manhã (08h00 às 10h30)',
+  'Participante Exemplo 2;14;Responsável Exemplo 2;(00) 00000-0000;exemplo2@dominio.com;Tarde (14h00 às 16h30)',
 ].join('\r\n');
 
 export interface ParsedEnrollmentCsvRow {
