@@ -25,7 +25,10 @@ import {
 } from '../components/PainelLateral.tsx';
 import { ConfirmarExclusao } from '../components/ConfirmarExclusao.tsx';
 import { useClubData } from '../../context/ClubDataContext.tsx';
-import type { ProjectParticipant } from '../../types/index.ts';
+import {
+  syncProjectSpotsAndTeams,
+  type ProjectParticipant,
+} from '../../types/index.ts';
 import {
   NEXTFIT_SAMPLE_CSV_CONTENT,
   parseNextFitCsv,
@@ -71,12 +74,13 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
 
   // Public Showcase Form fields
   const [formProjectId, setFormProjectId] = useState('');
+  const [formTeamId, setFormTeamId] = useState('');
   const [formName, setFormName] = useState('');
   const [formNickname, setFormNickname] = useState('');
-  const [formCategory, setFormCategory] = useState('Sub-15');
-  const [formPosition, setFormPosition] = useState('Meia');
+  const [formCategory, setFormCategory] = useState('12 a 13 anos');
+  const [formPosition, setFormPosition] = useState('Ponteira');
   const [formJersey, setFormJersey] = useState('10');
-  const [formAge, setFormAge] = useState('14');
+  const [formAge, setFormAge] = useState('12');
   const [formCardTier, setFormCardTier] = useState<ProjectParticipant['cardTier']>('prata');
   const [formOverall, setFormOverall] = useState('78');
   const [formScoutSummary, setFormScoutSummary] = useState('');
@@ -85,6 +89,12 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
   // Delete confirmation modal
   const [deleteTarget, setDeleteTarget] =
     useState<ShowcaseParticipantRow | null>(null);
+
+  const selectedFormProject = useMemo(
+    () =>
+      projects.find((p) => p.id === formProjectId) || projects[0],
+    [projects, formProjectId]
+  );
 
   const allRows = useMemo(() => {
     const list: ShowcaseParticipantRow[] = [];
@@ -105,7 +115,8 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
         r.participant.name.toLowerCase().includes(q) ||
         (r.participant.nickname || '').toLowerCase().includes(q) ||
         (r.participant.category || '').toLowerCase().includes(q) ||
-        (r.participant.position || '').toLowerCase().includes(q)
+        (r.participant.position || '').toLowerCase().includes(q) ||
+        (r.participant.modalityOrClass || '').toLowerCase().includes(q)
     );
   }, [projects, projectFilter, searchQuery]);
 
@@ -113,13 +124,15 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     setIsNew(false);
     setEditingRow(row);
     const p = row.participant;
+    const proj = projects.find((pr) => pr.id === row.projectId) || projects[0];
     setFormProjectId(row.projectId);
+    setFormTeamId(p.teamId || proj?.teams?.[0]?.id || '');
     setFormName(p.name);
     setFormNickname(p.nickname || '');
-    setFormCategory(p.category || 'Sub-15');
-    setFormPosition(p.position || 'Meia');
+    setFormCategory(p.category || '12 a 13 anos');
+    setFormPosition(p.position || 'Ponteira');
     setFormJersey(String(p.jerseyNumber || 10));
-    setFormAge(String(p.age || 14));
+    setFormAge(String(p.age || 12));
     setFormCardTier(p.cardTier || 'prata');
     setFormOverall(String(p.stats?.overall || 78));
     setFormScoutSummary(p.scoutReport?.summary || '');
@@ -132,19 +145,22 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
       projectFilter !== 'all'
         ? projectFilter
         : projects[0]?.id || '';
+    const defaultProj = projects.find((p) => p.id === defaultProjId) || projects[0];
+    const firstTeam = defaultProj?.teams?.[0];
     setIsNew(true);
     setEditingRow({
       projectId: defaultProjId,
-      projectName: projects.find((p) => p.id === defaultProjId)?.name || '',
+      projectName: defaultProj?.name || '',
       participant: {} as ProjectParticipant,
     });
     setFormProjectId(defaultProjId);
+    setFormTeamId(firstTeam?.id || '');
     setFormName('');
     setFormNickname('');
-    setFormCategory('Sub-15');
-    setFormPosition('Meia');
+    setFormCategory(firstTeam?.category || '12 a 13 anos');
+    setFormPosition('Ponteira');
     setFormJersey('10');
-    setFormAge('14');
+    setFormAge('12');
     setFormCardTier('prata');
     setFormOverall('78');
     setFormScoutSummary('Atleta integrante da vitrine esportiva Vitalizar.');
@@ -161,6 +177,11 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
 
     const partId = isNew ? `part-${Date.now()}` : editingRow.participant.id;
     const ovr = Math.min(99, Math.max(50, Number(formOverall) || 78));
+    const targetTeam = selectedFormProject?.teams?.find((t) => t.id === formTeamId);
+    const modalityOrClassLabel = targetTeam
+      ? `${targetTeam.name} (${targetTeam.modality} · ${targetTeam.polo})`
+      : editingRow.participant.modalityOrClass || selectedFormProject?.name;
+
     const basePart: ProjectParticipant = sanitizeShowcaseParticipant(
       isNew
         ? {
@@ -168,6 +189,9 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
             name: formName.trim(),
             nickname: formNickname.trim() || formName.trim().split(' ')[0],
             enrollmentStatus: 'ativo',
+            teamId: targetTeam?.id || formTeamId || undefined,
+            modality: targetTeam?.modality,
+            modalityOrClass: modalityOrClassLabel,
             photoUrl:
               formPhotoUrl.trim() ||
               'https://images.unsplash.com/photo-1517466787929-bc90951d0974?w=400&q=80',
@@ -175,9 +199,9 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
             position: formPosition.trim() || 'Atleta',
             positionGroup: 'meio',
             preferredFoot: 'Destro',
-            age: Number(formAge) || 14,
+            age: Number(formAge) || 12,
             birthDate: '',
-            category: formCategory.trim() || 'Sub-15',
+            category: formCategory.trim() || targetTeam?.category || '12 a 13 anos',
             height: '',
             weight: '',
             cardTier: formCardTier,
@@ -212,6 +236,9 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
             ...editingRow.participant,
             name: formName.trim(),
             nickname: formNickname.trim() || formName.trim().split(' ')[0],
+            teamId: targetTeam?.id || formTeamId || editingRow.participant.teamId,
+            modality: targetTeam?.modality || editingRow.participant.modality,
+            modalityOrClass: modalityOrClassLabel,
             photoUrl: formPhotoUrl.trim() || editingRow.participant.photoUrl,
             jerseyNumber: Number(formJersey) || 10,
             position: formPosition.trim(),
@@ -248,27 +275,24 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
         (p) => p.id !== partId
       );
       if (proj.id === formProjectId) {
-        const nextList = [...filteredOut, basePart];
-        return {
+        return syncProjectSpotsAndTeams({
           ...proj,
-          participants: nextList,
-          filledSpots: nextList.length,
-        };
+          participants: [...filteredOut, basePart],
+        });
       }
       if (proj.id === editingRow.projectId && proj.id !== formProjectId) {
-        return {
+        return syncProjectSpotsAndTeams({
           ...proj,
           participants: filteredOut,
-          filledSpots: filteredOut.length,
-        };
+        });
       }
-      return proj;
+      return syncProjectSpotsAndTeams(proj);
     });
 
     saveAdminChanges({
       projects: updatedProjects,
-      toastMessage: `Atleta "${formName.trim()}" salvo na vitrine!`,
-      logDetails: `Atleta ${formName.trim()} salvo no projeto ${formProjectId}.`,
+      toastMessage: `Atleta "${formName.trim()}" salvo e vinculado ao Time!`,
+      logDetails: `Atleta ${formName.trim()} salvo no projeto ${formProjectId} (${targetTeam?.name || 'Time'}).`,
     });
 
     recordAuditEvent({
@@ -277,7 +301,7 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
       itemId: partId,
       role: profile.role,
       beforeSummary: isNew ? 'novo' : editingRow.participant.name,
-      afterSummary: `${formName.trim()} (${formCategory})`,
+      afterSummary: `${formName.trim()} (${targetTeam?.name || formCategory})`,
     });
 
     setTimeout(() => {
@@ -300,11 +324,10 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
       const nextList = (proj.participants || []).filter(
         (p) => p.id !== target.participant.id
       );
-      return {
+      return syncProjectSpotsAndTeams({
         ...proj,
         participants: nextList,
-        filledSpots: nextList.length,
-      };
+      });
     });
 
     onScheduleUndoDelete(
@@ -456,11 +479,16 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     },
     {
       id: 'projeto',
-      header: 'Projeto Social',
+      header: 'Projeto & Time / Turma',
       render: (r) => (
-        <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
-          {r.projectName}
-        </span>
+        <div className="space-y-0.5">
+          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 block">
+            {r.projectName}
+          </span>
+          <span className="text-[11px] text-[#0284c7] dark:text-sky-400 font-medium block">
+            {r.participant.modalityOrClass || r.participant.modality || 'Time Oficial'}
+          </span>
+        </div>
       ),
     },
     {
@@ -608,21 +636,53 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
         onSave={handleSaveParticipant}
       >
         <div className="space-y-4">
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
-              Projeto Vinculado *
-            </label>
-            <select
-              value={formProjectId}
-              onChange={(e) => setFormProjectId(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
-            >
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
+                Projeto Vinculado *
+              </label>
+              <select
+                value={formProjectId}
+                onChange={(e) => {
+                  const nextPid = e.target.value;
+                  setFormProjectId(nextPid);
+                  const nextProj = projects.find((pr) => pr.id === nextPid);
+                  if (nextProj?.teams?.[0]) {
+                    setFormTeamId(nextProj.teams[0].id);
+                    setFormCategory(nextProj.teams[0].category);
+                  }
+                }}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
+                Time / Turma *
+              </label>
+              <select
+                value={formTeamId}
+                onChange={(e) => {
+                  const tid = e.target.value;
+                  setFormTeamId(tid);
+                  const tm = selectedFormProject?.teams?.find((t) => t.id === tid);
+                  if (tm) setFormCategory(tm.category);
+                }}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+              >
+                {(selectedFormProject?.teams || []).map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} — {t.modality} ({t.filledSpots ?? 0}/{t.totalSpots} vagas)
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

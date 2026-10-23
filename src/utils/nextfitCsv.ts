@@ -510,7 +510,10 @@ export function mergeNextFitRowsIntoProjects(
     }
 
     proj.participants = list;
-    proj.filledSpots = list.length;
+    const total = proj.totalSpots ?? 100;
+    const filled = list.length;
+    proj.filledSpots = filled;
+    proj.availableSpots = Math.max(0, total - filled);
   });
 
   return {

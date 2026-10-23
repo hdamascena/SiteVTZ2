@@ -17,8 +17,13 @@ import {
   Activity,
   ShieldCheck,
   Eye,
+  Trophy,
 } from 'lucide-react';
-import { VitalizarProject, ProjectParticipant } from '../types/index.ts';
+import {
+  VitalizarProject,
+  ProjectParticipant,
+  syncProjectSpotsAndTeams,
+} from '../types/index.ts';
 import { PlayerCard } from './PlayerCard.tsx';
 import { useClubData } from '../context/ClubDataContext.tsx';
 
@@ -28,7 +33,7 @@ interface ProjectDetailPageProps {
   project: VitalizarProject;
   initialTab?: ProjectDetailTab;
   onBack: () => void;
-  onEnrollDirect: (project: VitalizarProject) => void;
+  onEnrollDirect: (project: VitalizarProject, teamId?: string) => void;
   onInspectPlayer: (participant: ProjectParticipant) => void;
   onOpenScoutContact: (participant: ProjectParticipant) => void;
 }
@@ -43,24 +48,40 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
 }) => {
   const { projects } = useClubData();
 
-  const liveProject = useMemo(
-    () => projects.find((p) => p.id === project.id) || project,
-    [projects, project]
-  );
+  const liveProject = useMemo(() => {
+    const found = projects.find((p) => p.id === project.id) || project;
+    return syncProjectSpotsAndTeams(found);
+  }, [projects, project]);
 
   const [activeTab, setActiveTab] = useState<ProjectDetailTab>(initialTab);
+  const [selectedModality, setSelectedModality] = useState<string>('todas');
   const [filterPosition, setFilterPosition] = useState<string>('todas');
   const [filterCategory, setFilterCategory] = useState<string>('todas');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const [partSearchQuery, setPartSearchQuery] = useState<string>('');
-  const [partCategoryFilter, setPartCategoryFilter] = useState<string>('all');
+  const [partTeamFilter, setPartTeamFilter] = useState<string>('all');
 
   useEffect(() => {
     setActiveTab(initialTab);
+    setSelectedModality('todas');
+    setPartTeamFilter('all');
   }, [initialTab, project.id]);
 
   const participants = liveProject.participants || [];
+  const teams = liveProject.teams || [];
+  const modalities = useMemo(() => {
+    if (liveProject.modalities && liveProject.modalities.length > 0) {
+      return liveProject.modalities;
+    }
+    return Array.from(new Set(teams.map((t) => t.modality).filter(Boolean)));
+  }, [liveProject.modalities, teams]);
+
+  const filteredTeams = useMemo(() => {
+    if (selectedModality === 'todas') return teams;
+    return teams.filter((t) => t.modality === selectedModality);
+  }, [teams, selectedModality]);
+
   const staff = liveProject.staff || [];
   const functioning = liveProject.functioning;
 
@@ -83,11 +104,15 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
     const q = partSearchQuery.trim().toLowerCase();
     return participants.filter((p) => {
       if ((p.enrollmentStatus || 'ativo') === 'inativo') return false;
-      if (
-        partCategoryFilter !== 'all' &&
-        !(p.category || '').toLowerCase().includes(partCategoryFilter.toLowerCase())
-      ) {
-        return false;
+      if (partTeamFilter !== 'all') {
+        const teamObj = teams.find((t) => t.id === partTeamFilter);
+        const matchesTeam =
+          p.teamId === partTeamFilter ||
+          (teamObj &&
+            (p.modalityOrClass || '')
+              .toLowerCase()
+              .includes(teamObj.name.toLowerCase()));
+        if (!matchesTeam) return false;
       }
       if (!q) return true;
       return (
@@ -97,11 +122,11 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
         (p.position || '').toLowerCase().includes(q)
       );
     });
-  }, [participants, partSearchQuery, partCategoryFilter]);
+  }, [participants, partSearchQuery, partTeamFilter, teams]);
 
-  const available = liveProject.availableSpots ?? 20;
-  const total = liveProject.totalSpots ?? 100;
-  const filled = liveProject.filledSpots ?? participants.length ?? total - available;
+  const total = liveProject.totalSpots ?? 300;
+  const filled = liveProject.filledSpots ?? participants.length;
+  const available = liveProject.availableSpots ?? Math.max(0, total - filled);
   const percentFilled = Math.min(100, Math.round((filled / Math.max(1, total)) * 100));
 
   return (
@@ -117,8 +142,13 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
           <span>Voltar a Todos os Projetos</span>
         </button>
 
-        <div className="text-xs font-semibold text-[#0284c7] uppercase tracking-wider">
-          {liveProject.category.replace('_', ' ')}
+        <div className="flex items-center gap-2 text-xs font-semibold text-[#0284c7] uppercase tracking-wider">
+          <span>{liveProject.incentiveLaw || liveProject.category.replace('_', ' ')}</span>
+          {liveProject.projectNumber && (
+            <span className="px-2.5 py-0.5 rounded-md bg-sky-50 border border-sky-200 text-sky-800 font-mono">
+              Nº {liveProject.projectNumber}
+            </span>
+          )}
         </div>
       </div>
 
@@ -141,9 +171,19 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
             )}
 
             <div className="space-y-2">
-              <span className="text-xs font-black uppercase tracking-widest text-sky-400">
-                Associação Esportiva Vitalizar · Polo Cariacica/ES
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-black uppercase tracking-widest text-sky-400">
+                  Associação Esportiva Vitalizar · Cariacica/ES
+                </span>
+                {modalities.map((mod) => (
+                  <span
+                    key={mod}
+                    className="px-2 py-0.5 rounded bg-white/15 text-white text-[11px] font-bold"
+                  >
+                    {mod}
+                  </span>
+                ))}
+              </div>
               <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-white">
                 {liveProject.name}
               </h1>
@@ -173,7 +213,9 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
           <div className="w-full lg:w-80 bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/15 space-y-4 shrink-0">
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs font-bold">
-                <span className="text-slate-300">Quadro de Vagas</span>
+                <span className="text-slate-300">
+                  Quadro Geral ({teams.length || 1} Times)
+                </span>
                 <span className="text-emerald-300 font-mono tabular-nums">
                   {available} vagas abertas
                 </span>
@@ -185,7 +227,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                 />
               </div>
               <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono tabular-nums">
-                <span>{participants.length} participantes</span>
+                <span>{filled} atletas vinculados</span>
                 <span>Total: {total} vagas</span>
               </div>
             </div>
@@ -196,7 +238,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
               className="w-full py-3 px-4 bg-[#0284c7] hover:bg-sky-500 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
             >
               <FileCheck2 className="w-4 h-4" />
-              <span>Fazer Cadastro Imediato</span>
+              <span>Escolher Time e Fazer Inscrição</span>
             </button>
           </div>
         </div>
@@ -213,8 +255,8 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
-          <Sparkles className="w-4 h-4" />
-          <span>Como Funciona o Projeto</span>
+          <Trophy className="w-4 h-4" />
+          <span>Modalidades, Times & Vagas ({teams.length})</span>
         </button>
 
         <button
@@ -227,7 +269,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
           }`}
         >
           <Users className="w-4 h-4" />
-          <span>Participantes ({participants.length})</span>
+          <span>Participantes por Time ({participants.length})</span>
         </button>
 
         <button
@@ -240,7 +282,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
           }`}
         >
           <GraduationCap className="w-4 h-4" />
-          <span>Equipe de Professores ({staff.length})</span>
+          <span>Equipe Técnica ({staff.length})</span>
         </button>
 
         <button
@@ -272,16 +314,16 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                   <span>Exibição exclusiva de dados públicos esportivos</span>
                 </div>
                 <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900">
-                  Turma e Atletas — {liveProject.name}
+                  Times e Atletas Vinculados — {liveProject.name}
                 </h3>
                 <p className="text-xs sm:text-sm text-slate-600 max-w-3xl leading-relaxed">
-                  Relação de atletas e participantes integrados às turmas do projeto{' '}
-                  <strong className="text-slate-900">{liveProject.name}</strong>. Dados escolares, saúde e contatos das famílias são protegidos e restritos à coordenação pedagógica.
+                  Relação de atletas e participantes integrados aos Times/Turmas do projeto{' '}
+                  <strong className="text-slate-900">{liveProject.name}</strong>. Cada atleta vinculado preenche automaticamente uma vaga em seu respectivo Time.
                 </p>
               </div>
             </div>
 
-            {/* Public Search & Category Filter */}
+            {/* Public Search & Team Filter */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -289,23 +331,22 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                   type="text"
                   value={partSearchQuery}
                   onChange={(e) => setPartSearchQuery(e.target.value)}
-                  placeholder="Buscar participante por nome, apelido ou posição..."
+                  placeholder="Buscar participante por nome, apelido, posição ou time..."
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
               </div>
 
               <select
-                value={partCategoryFilter}
-                onChange={(e) => setPartCategoryFilter(e.target.value)}
+                value={partTeamFilter}
+                onChange={(e) => setPartTeamFilter(e.target.value)}
                 className="px-3.5 py-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs font-bold text-slate-700"
               >
-                <option value="all">Todas as Categorias ({participants.length})</option>
-                <option value="Sub-11">Sub-11</option>
-                <option value="Sub-13">Sub-13</option>
-                <option value="Sub-15">Sub-15</option>
-                <option value="Sub-17">Sub-17</option>
-                <option value="Sub-20">Sub-20</option>
-                <option value="Vida Ativa">Vida Ativa 60+</option>
+                <option value="all">Todos os Times / Turmas ({participants.length})</option>
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({t.filledSpots ?? 0}/{t.totalSpots} vagas)
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -318,57 +359,189 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredProjectParticipants.map((p) => (
-                  <div
-                    key={p.id}
-                    className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 hover:bg-white hover:border-sky-300 transition-all flex flex-col justify-between space-y-3"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <img
-                          src={p.photoUrl}
-                          alt={p.name}
-                          referrerPolicy="no-referrer"
-                          className="w-12 h-12 rounded-xl object-cover border border-slate-200 shrink-0"
-                        />
-                        <div className="min-w-0">
-                          <span className="text-[11px] font-mono font-bold text-[#0284c7] block">
-                            Camisa #{p.jerseyNumber} · {p.category}
-                          </span>
-                          <h4 className="font-extrabold text-sm text-slate-900 truncate">
-                            {p.name}
-                          </h4>
-                          <span className="text-[11px] text-slate-500 block truncate">
-                            {p.position} · {p.preferredFoot}
-                          </span>
+                {filteredProjectParticipants.map((p) => {
+                  const linkedTeam = teams.find((t) => t.id === p.teamId);
+                  return (
+                    <div
+                      key={p.id}
+                      className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 hover:bg-white hover:border-sky-300 transition-all flex flex-col justify-between space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <img
+                            src={p.photoUrl}
+                            alt={p.name}
+                            referrerPolicy="no-referrer"
+                            className="w-12 h-12 rounded-xl object-cover border border-slate-200 shrink-0"
+                          />
+                          <div className="min-w-0">
+                            <span className="text-[11px] font-mono font-bold text-[#0284c7] block">
+                              Camisa #{p.jerseyNumber} · {p.category}
+                            </span>
+                            <h4 className="font-extrabold text-sm text-slate-900 truncate">
+                              {p.name}
+                            </h4>
+                            <span className="text-[11px] text-slate-500 block truncate">
+                              {p.position} · {p.modality || linkedTeam?.modality || 'Esporte'}
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200/70">
-                      <span className="text-[11px] text-slate-500 truncate">
-                        {p.modalityOrClass || liveProject.name}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => onInspectPlayer(p)}
-                        className="px-3 py-1.5 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shrink-0 flex items-center gap-1"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>Ver Cartinha</span>
-                      </button>
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200/70">
+                        <span className="text-[11px] font-semibold text-slate-700 truncate">
+                          {linkedTeam ? linkedTeam.name : p.modalityOrClass || liveProject.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => onInspectPlayer(p)}
+                          className="px-3 py-1.5 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shrink-0 flex items-center gap-1"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Ver Cartinha</span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* TAB 1: FUNCIONAMENTO DO PROJETO */}
+      {/* TAB 1: MODALIDADES, TIMES / TURMAS & FUNCIONAMENTO DO PROJETO */}
       {activeTab === 'funcionamento' && (
         <div className="space-y-8 animate-in fade-in duration-200">
+          {/* MODALIDADES E TIMES / TURMAS GRID */}
+          {teams.length > 0 && (
+            <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-6">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+                <div className="space-y-1">
+                  <span className="text-xs font-bold uppercase tracking-wider text-[#0284c7]">
+                    Estrutura Esportiva Oficial · Modalidades & Times
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+                    Quadro de Times / Turmas e Vagas por Modalidade
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-600">
+                    Escolha a modalidade para visualizar os horários, polos de treinamento e vagas disponíveis em cada Time.
+                  </p>
+                </div>
+
+                {/* Modality Filter Pills */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedModality('todas')}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      selectedModality === 'todas'
+                        ? 'bg-[#0284c7] text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    Todas ({teams.length} Times · {total} vagas)
+                  </button>
+                  {modalities.map((mod) => {
+                    const modTeams = teams.filter((t) => t.modality === mod);
+                    const modTotal = modTeams.reduce((s, t) => s + t.totalSpots, 0);
+                    return (
+                      <button
+                        key={mod}
+                        type="button"
+                        onClick={() => setSelectedModality(mod)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          selectedModality === mod
+                            ? 'bg-[#0284c7] text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        }`}
+                      >
+                        {mod} ({modTeams.length} Times · {modTotal} vagas)
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Cards of Times / Turmas */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredTeams.map((team) => {
+                  const tFilled = team.filledSpots ?? 0;
+                  const tTotal = team.totalSpots;
+                  const tAvail = team.availableSpots ?? Math.max(0, tTotal - tFilled);
+                  const tPct = Math.min(100, Math.round((tFilled / Math.max(1, tTotal)) * 100));
+
+                  return (
+                    <div
+                      key={team.id}
+                      className="rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-sky-300 transition-all p-5 flex flex-col justify-between space-y-4"
+                    >
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="px-2.5 py-0.5 rounded-md bg-sky-100 text-[#0284c7] text-[11px] font-extrabold uppercase">
+                            {team.modality}
+                          </span>
+                          <span className="text-[11px] font-semibold text-slate-600">
+                            {team.gender} · {team.category}
+                          </span>
+                        </div>
+
+                        <h3 className="text-base font-extrabold text-slate-900">
+                          {team.name}
+                        </h3>
+
+                        <div className="space-y-1 text-xs text-slate-600 pt-1">
+                          <div className="flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-[#0284c7] shrink-0" />
+                            <span>{team.schedule}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <MapPin className="w-3.5 h-3.5 text-[#0284c7] shrink-0" />
+                            <span>{team.polo}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 pt-3 border-t border-slate-200/80">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs font-bold">
+                            <span className="text-slate-700">Vagas do Time</span>
+                            <span
+                              className={`font-mono tabular-nums ${
+                                tAvail > 0 ? 'text-emerald-700' : 'text-rose-600'
+                              }`}
+                            >
+                              {tAvail} disponíveis
+                            </span>
+                          </div>
+                          <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-[#0284c7] rounded-full"
+                              style={{ width: `${tPct}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono tabular-nums">
+                            <span>{tFilled} preenchidas</span>
+                            <span>Limite: {tTotal} vagas</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => onEnrollDirect(liveProject, team.id)}
+                          className="w-full py-2.5 px-3 bg-[#0284c7] hover:bg-[#0369a1] text-white font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                        >
+                          <FileCheck2 className="w-3.5 h-3.5" />
+                          <span>Inscrever neste Time</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {functioning ? (
             <>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -387,7 +560,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                       Público-Alvo:
                     </span>
                     <p className="text-xs text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                      {project.targetAudience}
+                      {liveProject.targetAudience}
                     </p>
                   </div>
                 </div>
@@ -404,64 +577,14 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                   </p>
                   <div className="pt-2">
                     <span className="text-xs font-bold text-slate-700 block mb-1">
-                      Fonte de Custeio / Parcerias:
+                      Locais de Treinamento (Polos):
                     </span>
                     <p className="text-xs text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                      {project.fundingSource}
+                      {liveProject.location}
                     </p>
                   </div>
                 </div>
               </div>
-
-              {functioning.scheduleDetails && functioning.scheduleDetails.length > 0 && (
-                <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
-                    <div>
-                      <h3 className="font-extrabold text-lg text-slate-900">
-                        Grade de Dias, Horários & Polos
-                      </h3>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Turmas distribuídas por faixa etária e nível técnico nos polos de Cariacica.
-                      </p>
-                    </div>
-                    <span className="text-xs font-bold text-emerald-700">
-                      Atividades 100% Gratuitas
-                    </span>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-200 text-slate-500 bg-slate-50">
-                          <th className="py-3 px-4 font-bold">Dia da Semana</th>
-                          <th className="py-3 px-4 font-bold">Horário</th>
-                          <th className="py-3 px-4 font-bold">Polo / Espaço</th>
-                          <th className="py-3 px-4 font-bold">Modalidade / Categoria</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {functioning.scheduleDetails.map((item, idx) => (
-                          <tr key={idx} className="hover:bg-sky-50/50 transition-colors">
-                            <td className="py-3 px-4 font-semibold text-slate-900">
-                              {item.day}
-                            </td>
-                            <td className="py-3 px-4 text-slate-600 font-mono">
-                              {item.hours}
-                            </td>
-                            <td className="py-3 px-4 text-slate-700 flex items-center gap-1">
-                              <MapPin className="w-3 h-3 text-[#0284c7] shrink-0" />
-                              <span>{item.polo}</span>
-                            </td>
-                            <td className="py-3 px-4 font-bold text-[#0284c7]">
-                              {item.modality}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 space-y-4 shadow-xs">
@@ -502,18 +625,18 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
               <div className="bg-gradient-to-r from-sky-50 via-white to-sky-50 border border-sky-200 p-6 sm:p-8 rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-6 shadow-sm">
                 <div className="space-y-1">
                   <h4 className="text-lg font-extrabold text-slate-900">
-                    Pronto para ingressar no {project.name}?
+                    Pronto para ingressar em um Time do {liveProject.name}?
                   </h4>
                   <p className="text-xs text-slate-600 max-w-xl">
-                    As inscrições são gratuitas e acompanhadas pela equipe pedagógica da Vitalizar.
+                    As inscrições são 100% gratuitas e vinculadas diretamente ao Time e modalidade escolhidos.
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => onEnrollDirect(project)}
+                  onClick={() => onEnrollDirect(liveProject)}
                   className="px-6 py-3 bg-[#0284c7] hover:bg-[#0369a1] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-md transition-all cursor-pointer shrink-0"
                 >
-                  Fazer Cadastro Imediato
+                  Escolher Time e Inscrever
                 </button>
               </div>
             </>
@@ -534,10 +657,10 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                 Corpo Docente & Suporte Técnico
               </p>
               <h3 className="text-xl font-extrabold text-slate-900 mt-1">
-                Professores, Treinadores e Auxiliares Responsáveis
+                Professores, Treinadores e Equipe Multidisciplinar
               </h3>
               <p className="text-xs text-slate-500 mt-1">
-                Profissionais registrados no CREF/CREFITO com sólida vivência na formação desportiva e psicopedagógica.
+                Profissionais habilitados dedicados às turmas de Voleibol e Futsal nos polos de Cariacica.
               </p>
             </div>
             <div className="px-4 py-2 rounded-xl bg-sky-50 border border-sky-200 text-[#0284c7] text-xs font-bold self-start sm:self-auto">
@@ -602,7 +725,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-amber-300 font-bold uppercase tracking-wider">
                 <span>Vitrine Oficial de Olheiros & Scouts</span>
-                <span className="text-slate-400">· {project.name}</span>
+                <span className="text-slate-400">· {liveProject.name}</span>
               </div>
               <h3 className="text-xl sm:text-2xl font-extrabold text-white">
                 Cartinhas Técnicas dos Atletas em Destaque
@@ -644,10 +767,10 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                 className="px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs font-bold text-slate-700"
               >
                 <option value="todas">Todas as Posições</option>
-                <option value="goleiro">Goleiros</option>
-                <option value="defesa">Defensores / Zagueiros</option>
-                <option value="meio">Meio-Campistas / Volantes</option>
-                <option value="ataque">Atacantes / Extremos</option>
+                <option value="goleiro">Goleiros / Líberos</option>
+                <option value="defesa">Fixos / Defensores</option>
+                <option value="meio">Levantadores / Alas</option>
+                <option value="ataque">Ponteiras / Pivôs / Opostos</option>
               </select>
 
               <select
@@ -656,9 +779,10 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                 className="px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs font-bold text-slate-700"
               >
                 <option value="todas">Todas as Categorias</option>
-                <option value="sub-13">Sub-13</option>
-                <option value="sub-15">Sub-15</option>
-                <option value="sub-17">Sub-17</option>
+                <option value="9 a 11">9 a 11 anos</option>
+                <option value="12 a 13">12 a 13 anos</option>
+                <option value="12 a 14">12 a 14 anos</option>
+                <option value="14 a 15">14 a 15 anos</option>
               </select>
             </div>
           </div>
@@ -669,8 +793,8 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                 <PlayerCard
                   key={participant.id}
                   participant={participant}
-                  shieldUrl={project.shieldUrl}
-                  projectName={project.name}
+                  shieldUrl={liveProject.shieldUrl}
+                  projectName={liveProject.name}
                   onInspect={onInspectPlayer}
                   onOpenScout={onOpenScoutContact}
                 />
@@ -700,3 +824,4 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
     </div>
   );
 };
+

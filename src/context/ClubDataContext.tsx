@@ -9,18 +9,20 @@ import {
   FACILITY_POLOS,
 } from '../data/clubeData.ts';
 import { INITIAL_SPONSORS } from '../data/sponsorsData.ts';
-import type {
-  NewsArticle,
-  VitalizarEvent,
-  VitalizarProject,
-  TransparencyDocument,
-  PastEventPhoto,
-  Sponsor,
-  SiteSettings,
-  FacilityPolo,
-  ScoutInquiryRecord,
-  DonationPledgeRecord,
-  VolunteerApplicationRecord,
+import {
+  syncProjectSpotsAndTeams,
+  type NewsArticle,
+  type VitalizarEvent,
+  type VitalizarProject,
+  type ProjectParticipant,
+  type TransparencyDocument,
+  type PastEventPhoto,
+  type Sponsor,
+  type SiteSettings,
+  type FacilityPolo,
+  type ScoutInquiryRecord,
+  type DonationPledgeRecord,
+  type VolunteerApplicationRecord,
 } from '../types/index.ts';
 import {
   createAuditLogEntry,
@@ -153,6 +155,8 @@ export interface EventRsvpRecord {
   date: string;
   confirmationCode: string;
   projectId?: string;
+  teamId?: string;
+  modality?: string;
   enrollmentStatus?: ProjectEnrollmentStatus;
   studentName?: string;
   studentAge?: number;
@@ -575,76 +579,113 @@ function normalizeEvents(raw?: VitalizarEvent[] | null): VitalizarEvent[] {
     }));
 }
 
+const LEGACY_FICTIONAL_PROJECT_IDS = new Set([
+  'campeoes-futuro',
+  'vida-ativa',
+  'corpo-mente-saudavel',
+  'vitalizar-inclusivo',
+  'ritmo-cidadania',
+]);
+
 function normalizeProjects(raw?: VitalizarProject[] | null): VitalizarProject[] {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    return VITALIZAR_PROJECTS;
-  }
+  const validRaw = Array.isArray(raw)
+    ? raw.filter((p) => p && typeof p === 'object')
+    : [];
+
+  // Preserve any participants registered in legacy fictional projects before removing them
+  const migratedParticipants: ProjectParticipant[] = [];
+  validRaw.forEach((p) => {
+    if (LEGACY_FICTIONAL_PROJECT_IDS.has(p.id) && Array.isArray(p.participants)) {
+      migratedParticipants.push(...p.participants);
+    }
+  });
+
+  const nonLegacyRaw = validRaw.filter((p) => !LEGACY_FICTIONAL_PROJECT_IDS.has(p.id));
+  const source = nonLegacyRaw.length > 0 ? nonLegacyRaw : VITALIZAR_PROJECTS;
   const defaultMap = new Map(VITALIZAR_PROJECTS.map((p) => [p.id, p]));
-  return raw
-    .filter((p) => p && typeof p === 'object')
-    .map((proj, idx) => {
-      const id = proj.id || `projeto-${idx + 1}`;
-      const def = defaultMap.get(id);
-      return {
-        ...(def || {}),
-        ...proj,
-        id,
-        name: proj.name || def?.name || 'Projeto Socioesportivo Vitalizar',
-        category: proj.category || def?.category || 'esporte_educacional',
-        targetAudience: proj.targetAudience || def?.targetAudience || 'Comunidade de Cariacica',
-        description: proj.description || def?.description || '',
-        schedule: proj.schedule || def?.schedule || 'Terças e Quintas',
-        location: proj.location || def?.location || 'Polo Rio Marinho',
-        coordinator: proj.coordinator || def?.coordinator || 'Equipe Técnica Vitalizar',
-        fundingSource: proj.fundingSource || def?.fundingSource || 'Recursos Próprios & Fomento',
-        imageUrl:
-          proj.imageUrl ||
-          def?.imageUrl ||
-          'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=1000&q=80',
-        shieldUrl: proj.shieldUrl || def?.shieldUrl,
-        motto: proj.motto || def?.motto,
-        totalSpots:
-          typeof proj.totalSpots === 'number' && !Number.isNaN(proj.totalSpots)
-            ? proj.totalSpots
-            : def?.totalSpots || 60,
-        filledSpots:
-          typeof proj.filledSpots === 'number' && !Number.isNaN(proj.filledSpots)
-            ? proj.filledSpots
-            : def?.filledSpots || 45,
-        availableSpots:
-          typeof proj.availableSpots === 'number' && !Number.isNaN(proj.availableSpots)
-            ? proj.availableSpots
-            : def?.availableSpots || 15,
-        functioning:
-          proj.functioning && typeof proj.functioning === 'object'
-            ? {
-                ...def?.functioning,
-                ...proj.functioning,
-                overview: proj.functioning.overview ?? def?.functioning?.overview ?? '',
-                methodology: proj.functioning.methodology ?? def?.functioning?.methodology ?? '',
-                requirements: Array.isArray(proj.functioning.requirements)
-                  ? proj.functioning.requirements
-                  : def?.functioning?.requirements || [],
-                scheduleDetails: Array.isArray(proj.functioning.scheduleDetails)
-                  ? proj.functioning.scheduleDetails
-                  : def?.functioning?.scheduleDetails || [],
-                benefits: Array.isArray(proj.functioning.benefits)
-                  ? proj.functioning.benefits
-                  : def?.functioning?.benefits || [],
-              }
-            : def?.functioning,
-        staff: Array.isArray(proj.staff) ? proj.staff : def?.staff || [],
-        participants: Array.isArray(proj.participants)
-          ? proj.participants
-          : def?.participants || [],
-        tags: Array.isArray(proj.tags) ? proj.tags : def?.tags || [],
-        attachments: Array.isArray(proj.attachments) ? proj.attachments : def?.attachments || [],
-      };
+
+  return source.map((proj, idx) => {
+    const id = proj.id || `projeto-${idx + 1}`;
+    const def = defaultMap.get(id);
+    const baseParticipants = Array.isArray(proj.participants)
+      ? proj.participants
+      : def?.participants || [];
+    const existingIds = new Set(baseParticipants.map((pt) => pt.id));
+    const participants =
+      idx === 0 && migratedParticipants.length > 0
+        ? [
+            ...baseParticipants,
+            ...migratedParticipants.filter((pt) => !existingIds.has(pt.id)),
+          ]
+        : baseParticipants;
+
+    const teams =
+      Array.isArray(proj.teams) && proj.teams.length > 0
+        ? proj.teams
+        : def?.teams || [];
+
+    return syncProjectSpotsAndTeams({
+      ...(def || {}),
+      ...proj,
+      id,
+      name: proj.name || def?.name || 'Projeto Socioesportivo Vitalizar',
+      projectNumber: proj.projectNumber || def?.projectNumber,
+      incentiveLaw:
+        proj.incentiveLaw ||
+        def?.incentiveLaw ||
+        'Lei de Incentivo ao Esporte (Lei Federal nº 11.438/2006)',
+      modalities:
+        Array.isArray(proj.modalities) && proj.modalities.length > 0
+          ? proj.modalities
+          : def?.modalities || [],
+      teams,
+      category: proj.category || def?.category || 'esporte_educacional',
+      targetAudience: proj.targetAudience || def?.targetAudience || 'Comunidade de Cariacica',
+      description: proj.description || def?.description || '',
+      schedule: proj.schedule || def?.schedule || 'Conforme Time/Turma',
+      location: proj.location || def?.location || 'Polo Rio Marinho · Cariacica/ES',
+      coordinator: proj.coordinator || def?.coordinator || 'Equipe Técnica Vitalizar',
+      fundingSource: proj.fundingSource || def?.fundingSource || 'Lei de Incentivo ao Esporte',
+      imageUrl:
+        proj.imageUrl ||
+        def?.imageUrl ||
+        'https://images.unsplash.com/photo-1612872087720-bb876e2e67d1?w=1000&q=80',
+      shieldUrl: proj.shieldUrl || def?.shieldUrl,
+      motto: proj.motto || def?.motto,
+      functioning:
+        proj.functioning && typeof proj.functioning === 'object'
+          ? {
+              ...def?.functioning,
+              ...proj.functioning,
+              overview: proj.functioning.overview ?? def?.functioning?.overview ?? '',
+              methodology: proj.functioning.methodology ?? def?.functioning?.methodology ?? '',
+              requirements: Array.isArray(proj.functioning.requirements)
+                ? proj.functioning.requirements
+                : def?.functioning?.requirements || [],
+              scheduleDetails: Array.isArray(proj.functioning.scheduleDetails)
+                ? proj.functioning.scheduleDetails
+                : def?.functioning?.scheduleDetails || [],
+              benefits: Array.isArray(proj.functioning.benefits)
+                ? proj.functioning.benefits
+                : def?.functioning?.benefits || [],
+            }
+          : def?.functioning,
+      staff: Array.isArray(proj.staff) ? proj.staff : def?.staff || [],
+      participants,
+      tags: Array.isArray(proj.tags) ? proj.tags : def?.tags || [],
+      attachments: Array.isArray(proj.attachments) ? proj.attachments : def?.attachments || [],
     });
+  });
 }
 
 function normalizeFacilityPolos(raw?: FacilityPolo[] | null): FacilityPolo[] {
   if (!Array.isArray(raw) || raw.length === 0) {
+    return FACILITY_POLOS;
+  }
+  const hasRealPolos = raw.some(
+    (p) => p?.id === 'polo-emef-sao-jorge' || p?.id === 'polo-eeefm-alzira-ramos'
+  );
+  if (!hasRealPolos && raw.every((p) => ['polo-rio-marinho', 'quadra-comunitaria', 'espaco-condicionamento'].includes(p?.id))) {
     return FACILITY_POLOS;
   }
   return raw

@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import {
   UserPlus,
-  CheckCircle2,
   Clock,
   XCircle,
   Plus,
@@ -32,7 +31,10 @@ import {
   useClubData,
   type EventRsvpRecord,
 } from '../../context/ClubDataContext.tsx';
-import type { ProjectParticipant } from '../../types/index.ts';
+import {
+  syncProjectSpotsAndTeams,
+  type ProjectParticipant,
+} from '../../types/index.ts';
 import {
   ENROLLMENT_SAMPLE_CSV,
   parseEnrollmentsCsv,
@@ -73,12 +75,19 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [saveState, setSaveState] = useState<SaveIndicatorState>('idle');
   const [formProjectId, setFormProjectId] = useState(projects[0]?.id || '');
+  const [formTeamId, setFormTeamId] = useState(
+    projects[0]?.teams?.[0]?.id || ''
+  );
   const [formStudentName, setFormStudentName] = useState('');
   const [formStudentAge, setFormStudentAge] = useState('12');
   const [formResponsible, setFormResponsible] = useState('');
   const [formPhone, setFormPhone] = useState('');
   const [formEmail, setFormEmail] = useState('');
-  const [formModality, setFormModality] = useState('Manhã (08h00 às 10h30)');
+
+  const selectedFormProject = useMemo(
+    () => projects.find((p) => p.id === formProjectId) || projects[0],
+    [projects, formProjectId]
+  );
 
   const visibleEnrollments = useMemo(() => {
     return rsvps.filter((r) => {
@@ -91,7 +100,8 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
       return (
         (r.studentName || r.name || '').toLowerCase().includes(q) ||
         (r.confirmationCode || '').toLowerCase().includes(q) ||
-        (r.eventTitle || '').toLowerCase().includes(q)
+        (r.eventTitle || '').toLowerCase().includes(q) ||
+        (r.modalityOrClass || '').toLowerCase().includes(q)
       );
     });
   }, [rsvps, projects, projectFilter, statusFilter, searchQuery]);
@@ -127,19 +137,26 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
       return;
     }
 
+    const teams = targetProject.teams || [];
+    const matchedTeam =
+      teams.find((t) => t.id === rsvp.teamId) ||
+      teams.find(
+        (t) =>
+          rsvp.modalityOrClass &&
+          rsvp.modalityOrClass.toLowerCase().includes(t.name.toLowerCase())
+      ) ||
+      teams[0];
+
     const cleanName =
       rsvp.studentName || rsvp.name.split('(')[0].trim() || rsvp.name;
     const age = rsvp.studentAge || 12;
     const category =
-      age <= 11
-        ? 'Sub-11'
+      matchedTeam?.category ||
+      (age <= 11
+        ? '9 a 11 anos'
         : age <= 13
-        ? 'Sub-13'
-        : age <= 15
-        ? 'Sub-15'
-        : age <= 17
-        ? 'Sub-17'
-        : 'Vida Ativa';
+        ? '12 a 13 anos'
+        : '14 a 15 anos');
 
     const newParticipantId = `part-${Date.now()}`;
     const newParticipant: ProjectParticipant = sanitizeShowcaseParticipant({
@@ -147,11 +164,15 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
       name: cleanName,
       nickname: cleanName.split(' ')[0],
       enrollmentStatus: 'ativo',
-      modalityOrClass: rsvp.modalityOrClass || targetProject.name,
+      teamId: matchedTeam?.id,
+      modality: matchedTeam?.modality || rsvp.modality,
+      modalityOrClass: matchedTeam
+        ? `${matchedTeam.name} (${matchedTeam.modality} · ${matchedTeam.polo})`
+        : rsvp.modalityOrClass || targetProject.name,
       photoUrl:
         'https://images.unsplash.com/photo-1517466787929-bc90951d0974?w=400&q=80',
       jerseyNumber: ((targetProject.participants?.length || 0) % 99) + 1,
-      position: 'Polivalente',
+      position: 'Atleta',
       positionGroup: 'meio',
       preferredFoot: 'Destro',
       age,
@@ -187,16 +208,12 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
     });
 
     const updatedProjects = projects.map((pr) => {
-      if (pr.id !== targetProject.id) return pr;
+      if (pr.id !== targetProject.id) return syncProjectSpotsAndTeams(pr);
       const nextParticipants = [...(pr.participants || []), newParticipant];
-      const total = pr.totalSpots ?? 100;
-      const filled = nextParticipants.length;
-      return {
+      return syncProjectSpotsAndTeams({
         ...pr,
         participants: nextParticipants,
-        filledSpots: filled,
-        availableSpots: Math.max(0, total - filled),
-      };
+      });
     });
 
     const updatedRsvps = rsvps.map((item) =>
@@ -204,6 +221,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
         ? {
             ...item,
             projectId: targetProject.id,
+            teamId: matchedTeam?.id || item.teamId,
             enrollmentStatus: 'aprovada' as ProjectEnrollmentStatus,
           }
         : item
@@ -212,8 +230,8 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
     saveAdminChanges({
       projects: updatedProjects,
       rsvps: updatedRsvps,
-      toastMessage: `${cleanName} aprovado(a) e matriculado(a) na turma de ${targetProject.name}!`,
-      logDetails: `Matrícula confirmada de ${cleanName} no projeto ${targetProject.name}.`,
+      toastMessage: `${cleanName} aprovado(a) e matriculado(a) no ${matchedTeam?.name || targetProject.name}!`,
+      logDetails: `Matrícula confirmada de ${cleanName} no projeto ${targetProject.name} (${matchedTeam?.name || 'Turma'}).`,
     });
 
     recordAuditEvent({
@@ -221,7 +239,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
       collection: 'projects',
       itemId: targetProject.id,
       role: profile.role,
-      afterSummary: `Aluno ${cleanName} (${rsvp.confirmationCode}) matriculado em ${targetProject.name}`,
+      afterSummary: `Aluno ${cleanName} (${rsvp.confirmationCode}) matriculado em ${matchedTeam?.name || targetProject.name}`,
     });
   };
 
@@ -231,20 +249,28 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
       projects.find((p) => p.id === formProjectId) || projects[0];
     if (!proj || !formStudentName.trim() || !formPhone.trim()) return;
 
+    const targetTeam =
+      proj.teams?.find((t) => t.id === formTeamId) || proj.teams?.[0];
+    const teamLabel = targetTeam
+      ? `${targetTeam.name} (${targetTeam.modality} · ${targetTeam.schedule})`
+      : proj.name;
+
     setSaveState('saving');
     addRsvp({
       eventId: `inscricao-${proj.id}`,
       eventTitle: `Inscrição no Projeto: ${proj.name}`,
-      name: `${formStudentName.trim()} (${formStudentAge} anos · ${formModality})`,
+      name: `${formStudentName.trim()} (${formStudentAge} anos · ${teamLabel})`,
       phone: formPhone.trim(),
       email: formEmail.trim() || undefined,
       spots: 1,
       projectId: proj.id,
+      teamId: targetTeam?.id,
+      modality: targetTeam?.modality,
       enrollmentStatus: 'pendente',
       studentName: formStudentName.trim(),
       studentAge: Number(formStudentAge) || 12,
       responsibleName: formResponsible.trim() || undefined,
-      modalityOrClass: formModality,
+      modalityOrClass: teamLabel,
       userId: profile.uid,
     });
 
@@ -270,6 +296,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
         projects.find((p) => p.id === projectFilter) || projects[0];
       if (!targetProj) return;
 
+      const defaultTeam = targetProj.teams?.[0];
       const newRecords: EventRsvpRecord[] = parsed.rows.map((row, idx) => ({
         id: `rsvp-${Date.now()}-${idx}`,
         eventId: `inscricao-${targetProj.id}`,
@@ -281,6 +308,8 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
         date: new Date().toLocaleDateString('pt-BR'),
         confirmationCode: `VIT-${Math.floor(1000 + Math.random() * 9000)}`,
         projectId: targetProj.id,
+        teamId: defaultTeam?.id,
+        modality: defaultTeam?.modality,
         enrollmentStatus: 'pendente',
         studentName: row.studentName,
         studentAge: row.studentAge,
@@ -321,20 +350,21 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
     },
     {
       id: 'projeto',
-      header: 'Projeto / Turma',
+      header: 'Projeto / Time & Modalidade',
       render: (r) => {
         const pid = resolveProjectIdFromRsvp(r, projects);
         const proj = projects.find((p) => p.id === pid);
+        const linkedTeam = proj?.teams?.find((t) => t.id === r.teamId);
         return (
           <div>
             <span className="font-semibold text-slate-800 dark:text-slate-200 block">
               {proj ? proj.name : r.eventTitle}
             </span>
-            {r.modalityOrClass && (
-              <span className="text-[11px] text-slate-500">
-                {r.modalityOrClass}
-              </span>
-            )}
+            <span className="text-[11px] text-[#0284c7] dark:text-sky-400 font-medium">
+              {linkedTeam
+                ? `${linkedTeam.name} (${linkedTeam.modality} · ${linkedTeam.polo})`
+                : r.modalityOrClass || 'Time Oficial'}
+            </span>
           </div>
         );
       },
@@ -406,10 +436,10 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
                 type="button"
                 onClick={() => handleApproveAndEnrollInProject(r)}
                 className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
-                title="Aprovar inscrição e incluir atleta na vitrine do projeto"
+                title="Aprovar inscrição e incluir atleta no Time e na vitrine do projeto"
               >
                 <UserPlus className="w-3 h-3" />
-                <span>Aprovar na Vitrine</span>
+                <span>Aprovar no Time</span>
               </button>
             )}
             {st !== 'lista_espera' && st !== 'aprovada' && (
@@ -442,12 +472,13 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* Spots summary per project */}
+      {/* Spots summary per project & teams */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {projects.map((proj) => {
-          const total = proj.totalSpots ?? 100;
-          const filled = proj.participants?.length || 0;
-          const avail = Math.max(0, total - filled);
+          const synced = syncProjectSpotsAndTeams(proj);
+          const total = synced.totalSpots ?? 300;
+          const filled = synced.filledSpots ?? 0;
+          const avail = synced.availableSpots ?? Math.max(0, total - filled);
           return (
             <div
               key={proj.id}
@@ -462,7 +493,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
                   {avail} vagas
                 </span>
                 <span className="text-[11px] text-slate-500">
-                  {filled}/{total} na vitrine
+                  {filled}/{total} ({proj.teams?.length || 0} times)
                 </span>
               </div>
             </div>
@@ -476,7 +507,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
         keyExtractor={(r) => r.id}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        searchPlaceholder="Buscar por interessado, responsável ou protocolo..."
+        searchPlaceholder="Buscar por interessado, time, modalidade ou protocolo..."
         filterControls={
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -547,19 +578,19 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
               className="px-3.5 py-2 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Nova Inscrição em Projeto</span>
+              <span>Nova Inscrição em Time</span>
             </button>
           </div>
         }
         emptyTitle="Nenhuma inscrição encontrada"
-        emptyDescription="Use o botão 'Nova Inscrição em Projeto' para registrar uma solicitação de vaga."
+        emptyDescription="Use o botão 'Nova Inscrição em Time' para registrar uma solicitação de vaga."
       />
 
       <PainelLateral
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        title="Nova Inscrição em Projeto Social"
-        subtitle="Solicitação de matrícula gratuita vinculada às turmas da Vitalizar"
+        title="Nova Inscrição em Projeto e Time"
+        subtitle="Solicitação de matrícula gratuita vinculada diretamente aos Times/Turmas da Vitalizar"
         saveState={saveState}
         onSave={handleCreateEnrollment}
         saveLabel="Confirmar Inscrição"
@@ -571,26 +602,54 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
             </label>
             <select
               value={formProjectId}
-              onChange={(e) => setFormProjectId(e.target.value)}
+              onChange={(e) => {
+                const pid = e.target.value;
+                setFormProjectId(pid);
+                const nextProj = projects.find((pr) => pr.id === pid);
+                if (nextProj?.teams?.[0]) {
+                  setFormTeamId(nextProj.teams[0].id);
+                }
+              }}
               className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
             >
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.availableSpots ?? 20} vagas)
+              {projects.map((p) => {
+                const synced = syncProjectSpotsAndTeams(p);
+                return (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({synced.availableSpots ?? 300} vagas)
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
+              Time / Turma e Modalidade *
+            </label>
+            <select
+              value={formTeamId}
+              onChange={(e) => setFormTeamId(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+            >
+              {(selectedFormProject?.teams || []).map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} — {t.modality} ({t.schedule} · {t.polo}) [{t.filledSpots ?? 0}/{t.totalSpots} vagas]
                 </option>
               ))}
             </select>
           </div>
 
-          <CampoTexto
-            label="Nome Completo do Aluno / Participante"
-            value={formStudentName}
-            onChange={setFormStudentName}
-            required
-            classification="sensível"
-          />
-
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2">
+              <CampoTexto
+                label="Nome Completo do Aluno / Participante"
+                value={formStudentName}
+                onChange={setFormStudentName}
+                required
+                classification="sensível"
+              />
+            </div>
             <CampoTexto
               label="Idade"
               type="number"
@@ -598,12 +657,6 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
               onChange={setFormStudentAge}
               required
               classification="sensível"
-            />
-            <CampoTexto
-              label="Turno / Turma"
-              value={formModality}
-              onChange={setFormModality}
-              classification="público"
             />
           </div>
 
@@ -636,3 +689,4 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
     </div>
   );
 };
+

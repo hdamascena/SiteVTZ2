@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan to transform the application into an institutional and athletic showcase (vitrine) by removing the court attendance system, removing private LGPD parent/health records from athlete profiles, and simplifying access roles to Super Admin, Admin, Editor, Financeiro, and Parceiro.",
-  "updatedAt":  "2026-10-23T02:39:49.080814243Z",
+  "summary":  "Plano de reestruturação dos projetos da Associação Vitalizar para o modelo hierárquico: Projetos (Leis de Incentivo) -> Modalidades Esportivas -> Times / Turmas com controle automático de vagas por Time e substituição dos projetos fictícios pelo projeto oficial \"É Mais do que Esporte, É Vida!\".",
+  "updatedAt":  "2026-10-23T03:50:29.715533991Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

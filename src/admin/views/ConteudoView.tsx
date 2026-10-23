@@ -16,6 +16,7 @@ import { canDeleteRecords } from '../permissions.ts';
 import { useClubData } from '../../context/ClubDataContext.tsx';
 import type {
   VitalizarProject,
+  ProjectTeamClass,
   NewsArticle,
   VitalizarEvent,
   PastEventPhoto,
@@ -23,6 +24,7 @@ import type {
   FacilityPolo,
   TransparencyDocument,
 } from '../../types/index.ts';
+import { syncProjectSpotsAndTeams } from '../../types/index.ts';
 import {
   CampoTexto,
   CampoUploadImagem,
@@ -157,25 +159,42 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
 
     const openEditProject = (proj?: VitalizarProject) => {
       if (proj) {
-        setDraftProject({ ...proj });
+        setDraftProject(syncProjectSpotsAndTeams({ ...proj }));
       } else {
-        setDraftProject({
-          id: `proj-${Date.now()}`,
-          name: '',
-          category: 'esporte_educacional',
-          targetAudience: 'Crianças e adolescentes de 07 a 17 anos',
-          description: '',
-          schedule: 'Terças e Quintas · 08h às 10h',
-          location: 'Polo Rio Marinho · Cariacica/ES',
-          coordinator: 'Coordenação Técnica Vitalizar',
-          fundingSource: 'Recursos Próprios & Fomento',
-          imageUrl:
-            'https://images.unsplash.com/photo-1526232761682-d26e03ac148e?auto=format&fit=crop&w=900&q=80',
-          totalSpots: 50,
-          filledSpots: 0,
-          availableSpots: 50,
-          participants: [],
-        });
+        setDraftProject(
+          syncProjectSpotsAndTeams({
+            id: `proj-${Date.now()}`,
+            name: '',
+            projectNumber: '',
+            incentiveLaw: 'Lei de Incentivo ao Esporte',
+            modalities: ['Voleibol', 'Futsal'],
+            teams: [
+              {
+                id: `time-${Date.now()}`,
+                name: 'Time 01',
+                modality: 'Voleibol',
+                category: '9 a 11 anos',
+                gender: 'Misto',
+                schedule: '2ª, 4ª e 6ª · 08h00 às 09h00',
+                polo: 'EMEF São Jorge (Rio Marinho)',
+                totalSpots: 20,
+              },
+            ],
+            category: 'esporte_educacional',
+            targetAudience: 'Crianças e adolescentes de 09 a 15 anos',
+            description: '',
+            schedule: 'Segundas a Sextas · Manhã e Tarde',
+            location: 'EMEF São Jorge e EEEFM Alzira Ramos · Cariacica/ES',
+            coordinator: 'Coordenação Técnica Vitalizar',
+            fundingSource: 'Lei de Incentivo ao Esporte',
+            imageUrl:
+              'https://images.unsplash.com/photo-1526232761682-d26e03ac148e?auto=format&fit=crop&w=900&q=80',
+            totalSpots: 20,
+            filledSpots: 0,
+            availableSpots: 20,
+            participants: [],
+          })
+        );
       }
       setDrawerOpen(true);
     };
@@ -184,57 +203,88 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
       e.preventDefault();
       if (!draftProject || isReadOnly) return;
       setSaveState('saving');
-      const exists = projects.some((p) => p.id === draftProject.id);
+      const syncedDraft = syncProjectSpotsAndTeams(draftProject);
+      const exists = projects.some((p) => p.id === syncedDraft.id);
       const next = exists
-        ? projects.map((p) => (p.id === draftProject.id ? draftProject : p))
-        : [draftProject, ...projects];
+        ? projects.map((p) => (p.id === syncedDraft.id ? syncedDraft : p))
+        : [syncedDraft, ...projects];
 
-      saveAdminChanges({ projects: next }, `Projeto salvo: ${draftProject.name}`);
+      saveAdminChanges({ projects: next }, `Projeto salvo: ${syncedDraft.name}`);
       recordAuditEvent({
         action: exists ? 'update_project' : 'create_project',
         collection: 'projects',
-        itemId: draftProject.id,
-        afterSummary: draftProject.name,
+        itemId: syncedDraft.id,
+        afterSummary: `${syncedDraft.name} (${syncedDraft.teams?.length || 0} times, ${syncedDraft.totalSpots} vagas)`,
         role,
       });
       triggerSavedIndicator();
       setDrawerOpen(false);
     };
 
+    const updateDraftTeams = (nextTeams: ProjectTeamClass[]) => {
+      if (!draftProject) return;
+      const derivedModalities = Array.from(
+        new Set(nextTeams.map((t) => t.modality.trim()).filter(Boolean))
+      );
+      setDraftProject(
+        syncProjectSpotsAndTeams({
+          ...draftProject,
+          teams: nextTeams,
+          modalities:
+            derivedModalities.length > 0
+              ? derivedModalities
+              : draftProject.modalities,
+        })
+      );
+    };
+
     const columns: ColunaTabela<VitalizarProject>[] = [
       {
         id: 'name',
-        header: 'Projeto',
+        header: 'Projeto (Lei de Incentivo)',
         render: (p) => (
           <div>
             <span className="font-bold text-slate-900 dark:text-slate-100 block">
               {p.name}
             </span>
             <span className="text-[11px] text-slate-500">
-              {p.category} · {p.targetAudience}
+              {p.incentiveLaw || p.category}
+              {p.projectNumber ? ` · Nº ${p.projectNumber}` : ''} ·{' '}
+              {(p.modalities || []).join(', ') || p.targetAudience}
             </span>
           </div>
         ),
       },
       {
-        id: 'location',
-        header: 'Local e Horário',
+        id: 'teams',
+        header: 'Modalidades & Times',
         render: (p) => (
           <div className="text-xs">
-            <span className="block text-slate-800 dark:text-slate-200">{p.location}</span>
-            <span className="text-[11px] text-slate-500">{p.schedule}</span>
+            <span className="font-bold text-[#0284c7] dark:text-sky-400 block">
+              {(p.teams || []).length} Times / Turmas
+            </span>
+            <span className="text-[11px] text-slate-500">{p.location}</span>
           </div>
         ),
       },
       {
         id: 'participants',
-        header: 'Alunos / Vagas',
+        header: 'Preenchidas / Total (Disp.)',
         align: 'right',
-        render: (p) => (
-          <span className="font-mono text-xs font-bold">
-            {p.participants?.length || p.filledSpots || 0} / {p.totalSpots || 50}
-          </span>
-        ),
+        render: (p) => {
+          const synced = syncProjectSpotsAndTeams(p);
+          const total = synced.totalSpots ?? 300;
+          const filled = synced.filledSpots ?? 0;
+          const avail = synced.availableSpots ?? Math.max(0, total - filled);
+          return (
+            <span className="font-mono text-xs font-bold">
+              {filled} / {total}{' '}
+              <span className="text-emerald-600 dark:text-emerald-400 font-normal">
+                ({avail} disp.)
+              </span>
+            </span>
+          );
+        },
       },
       {
         id: 'coordinator',
@@ -255,7 +305,7 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
               type="button"
               onClick={() => openEditProject(p)}
               className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-              title={isReadOnly ? 'Visualizar' : 'Editar projeto'}
+              title={isReadOnly ? 'Visualizar' : 'Editar projeto e times'}
             >
               {isReadOnly ? <Eye className="w-3.5 h-3.5" /> : <Edit3 className="w-3.5 h-3.5" />}
             </button>
@@ -293,10 +343,10 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-extrabold text-slate-900 dark:text-slate-100">
-              Projetos Esportivos e Sociais
+              Projetos (Leis de Incentivo), Modalidades e Times / Turmas
             </h2>
             <p className="text-xs text-slate-500">
-              Classificação: <strong className="text-slate-700 dark:text-slate-300">Público</strong> (dados sensíveis dos alunos ficam isolados na aba Participantes).
+              Gerencie os projetos, suas modalidades esportivas e a capacidade de vagas de cada Time/Turma.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -333,27 +383,42 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
         <PainelLateral
           isOpen={drawerOpen && !!draftProject}
           onClose={() => setDrawerOpen(false)}
-          title={isReadOnly ? 'Detalhes do Projeto' : 'Editar Projeto'}
+          title={isReadOnly ? 'Detalhes do Projeto' : 'Editar Projeto, Modalidades & Times'}
           subtitle={draftProject?.name}
           saveState={saveState}
           onSave={!isReadOnly ? handleSaveProject : undefined}
-          saveLabel="Salvar Projeto"
+          saveLabel="Salvar Projeto e Times"
         >
           {draftProject && (
-            <div className="space-y-4">
-              <CampoTexto
-                label="Nome do Projeto"
-                required
-                disabled={isReadOnly}
-                value={draftProject.name}
-                onChange={(v) => setDraftProject({ ...draftProject, name: v })}
-              />
+            <div className="space-y-5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <CampoTexto
+                    label="Nome do Projeto"
+                    required
+                    disabled={isReadOnly}
+                    value={draftProject.name}
+                    onChange={(v) => setDraftProject({ ...draftProject, name: v })}
+                  />
+                </div>
+                <CampoTexto
+                  label="Nº Processo / SLI"
+                  disabled={isReadOnly}
+                  value={draftProject.projectNumber || ''}
+                  onChange={(v) =>
+                    setDraftProject({ ...draftProject, projectNumber: v })
+                  }
+                />
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <CampoTexto
-                  label="Categoria"
+                  label="Lei de Incentivo / Enquadramento"
                   disabled={isReadOnly}
-                  value={draftProject.category}
-                  onChange={(v) => setDraftProject({ ...draftProject, category: v })}
+                  value={draftProject.incentiveLaw || 'Lei de Incentivo ao Esporte'}
+                  onChange={(v) =>
+                    setDraftProject({ ...draftProject, incentiveLaw: v })
+                  }
                 />
                 <CampoTexto
                   label="Público-Alvo / Faixa Etária"
@@ -364,42 +429,237 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                   }
                 />
               </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <CampoTexto
-                  label="Local / Polo"
+                  label="Locais de Treino (Polos)"
                   disabled={isReadOnly}
                   value={draftProject.location}
                   onChange={(v) => setDraftProject({ ...draftProject, location: v })}
                 />
                 <CampoTexto
-                  label="Dias e Horários"
+                  label="Dias e Horários Gerais"
                   disabled={isReadOnly}
                   value={draftProject.schedule}
                   onChange={(v) => setDraftProject({ ...draftProject, schedule: v })}
                 />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <CampoTexto
-                  label="Coordenador / Responsável"
-                  disabled={isReadOnly}
-                  value={draftProject.coordinator}
-                  onChange={(v) =>
-                    setDraftProject({ ...draftProject, coordinator: v })
-                  }
-                />
-                <CampoTexto
-                  label="Total de Vagas"
-                  type="number"
-                  disabled={isReadOnly}
-                  value={String(draftProject.totalSpots || 50)}
-                  onChange={(v) =>
-                    setDraftProject({
-                      ...draftProject,
-                      totalSpots: Number(v) || 50,
-                    })
-                  }
-                />
+
+              {/* RESUMO AUTOMÁTICO DE VAGAS */}
+              <div className="grid grid-cols-3 gap-3 p-3.5 rounded-xl bg-sky-50/70 dark:bg-slate-800/70 border border-sky-200 dark:border-slate-700">
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                    Total de Vagas (Soma dos Times)
+                  </span>
+                  <span className="text-lg font-extrabold font-mono text-slate-900 dark:text-white">
+                    {draftProject.totalSpots ?? 0}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                    Preenchidas (Atletas)
+                  </span>
+                  <span className="text-lg font-extrabold font-mono text-[#0284c7]">
+                    {(draftProject.participants || []).length}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                    Vagas Disponíveis
+                  </span>
+                  <span className="text-lg font-extrabold font-mono text-emerald-600">
+                    {Math.max(
+                      0,
+                      (draftProject.totalSpots ?? 0) -
+                        (draftProject.participants || []).length
+                    )}
+                  </span>
+                </div>
               </div>
+
+              {/* GESTÃO DE TIMES / TURMAS DO PROJETO */}
+              <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 dark:text-slate-100">
+                      Times / Turmas e Vagas por Modalidade ({(draftProject.teams || []).length})
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Cada Time possui seu nome, modalidade, faixa etária, polo e número de vagas.
+                    </p>
+                  </div>
+                  {!isReadOnly && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const current = draftProject.teams || [];
+                        const nextNum = current.length + 1;
+                        updateDraftTeams([
+                          ...current,
+                          {
+                            id: `time-${Date.now()}`,
+                            name: `Time ${String(nextNum).padStart(2, '0')}`,
+                            modality: 'Voleibol',
+                            category: '9 a 11 anos',
+                            gender: 'Misto',
+                            schedule: '2ª, 4ª e 6ª · 08h00 às 09h00',
+                            polo: 'EMEF São Jorge (Rio Marinho)',
+                            totalSpots: 20,
+                          },
+                        ]);
+                      }}
+                      className="px-2.5 py-1.5 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Adicionar Time</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                  {(draftProject.teams || []).map((team, idx) => (
+                    <div
+                      key={team.id}
+                      className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 space-y-2.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-extrabold text-[#0284c7]">
+                          #{idx + 1} · {team.name} ({team.modality}) — {team.filledSpots ?? 0}/{team.totalSpots} vagas
+                        </span>
+                        {!isReadOnly && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = (draftProject.teams || []).filter(
+                                (t) => t.id !== team.id
+                              );
+                              updateDraftTeams(next);
+                            }}
+                            className="p-1 text-rose-600 hover:bg-rose-50 rounded cursor-pointer"
+                            title="Remover Time"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <input
+                          type="text"
+                          disabled={isReadOnly}
+                          value={team.name}
+                          onChange={(e) => {
+                            const next = (draftProject.teams || []).map((t) =>
+                              t.id === team.id ? { ...t, name: e.target.value } : t
+                            );
+                            updateDraftTeams(next);
+                          }}
+                          placeholder="Nome (ex: Time 01)"
+                          className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                        />
+                        <input
+                          type="text"
+                          disabled={isReadOnly}
+                          value={team.modality}
+                          onChange={(e) => {
+                            const next = (draftProject.teams || []).map((t) =>
+                              t.id === team.id ? { ...t, modality: e.target.value } : t
+                            );
+                            updateDraftTeams(next);
+                          }}
+                          placeholder="Modalidade (ex: Voleibol)"
+                          className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                        />
+                        <input
+                          type="text"
+                          disabled={isReadOnly}
+                          value={team.category}
+                          onChange={(e) => {
+                            const next = (draftProject.teams || []).map((t) =>
+                              t.id === team.id ? { ...t, category: e.target.value } : t
+                            );
+                            updateDraftTeams(next);
+                          }}
+                          placeholder="Faixa etária (ex: 9 a 11 anos)"
+                          className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                        />
+                        <input
+                          type="number"
+                          disabled={isReadOnly}
+                          value={team.totalSpots}
+                          onChange={(e) => {
+                            const spots = Math.max(1, Number(e.target.value) || 20);
+                            const next = (draftProject.teams || []).map((t) =>
+                              t.id === team.id ? { ...t, totalSpots: spots } : t
+                            );
+                            updateDraftTeams(next);
+                          }}
+                          placeholder="Vagas"
+                          className="px-2.5 py-1.5 text-xs font-mono font-bold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <select
+                          disabled={isReadOnly}
+                          value={team.gender}
+                          onChange={(e) => {
+                            const next = (draftProject.teams || []).map((t) =>
+                              t.id === team.id
+                                ? {
+                                    ...t,
+                                    gender: e.target.value as ProjectTeamClass['gender'],
+                                  }
+                                : t
+                            );
+                            updateDraftTeams(next);
+                          }}
+                          className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                        >
+                          <option value="Misto">Misto</option>
+                          <option value="Feminino">Feminino</option>
+                          <option value="Masculino">Masculino</option>
+                        </select>
+                        <input
+                          type="text"
+                          disabled={isReadOnly}
+                          value={team.schedule}
+                          onChange={(e) => {
+                            const next = (draftProject.teams || []).map((t) =>
+                              t.id === team.id ? { ...t, schedule: e.target.value } : t
+                            );
+                            updateDraftTeams(next);
+                          }}
+                          placeholder="Dias e Horário"
+                          className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                        />
+                        <input
+                          type="text"
+                          disabled={isReadOnly}
+                          value={team.polo}
+                          onChange={(e) => {
+                            const next = (draftProject.teams || []).map((t) =>
+                              t.id === team.id ? { ...t, polo: e.target.value } : t
+                            );
+                            updateDraftTeams(next);
+                          }}
+                          placeholder="Polo / Local de Treino"
+                          className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <CampoTexto
+                label="Coordenador / Responsável"
+                disabled={isReadOnly}
+                value={draftProject.coordinator}
+                onChange={(v) =>
+                  setDraftProject({ ...draftProject, coordinator: v })
+                }
+              />
               <CampoUploadImagem
                 label="Imagem de Capa do Projeto"
                 disabled={isReadOnly}
@@ -934,24 +1194,35 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                   onChange={(v) => setDraftEvent({ ...draftEvent, time: v })}
                 />
               </div>
+              <CampoTexto
+                label="Local"
+                value={draftEvent.location}
+                onChange={(v) => setDraftEvent({ ...draftEvent, location: v })}
+              />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <CampoTexto
-                  label="Local"
-                  value={draftEvent.location}
-                  onChange={(v) => setDraftEvent({ ...draftEvent, location: v })}
-                />
-                <CampoTexto
-                  label="Capacidade de Vagas"
+                  label="Capacidade Total de Vagas"
                   type="number"
-                  value={String(draftEvent.capacity || 60)}
+                  value={String(draftEvent.capacity ?? 60)}
                   onChange={(v) => {
-                    const cap = Number(v) || 60;
+                    const cap = Math.max(0, Number(v) || 0);
                     setDraftEvent({
                       ...draftEvent,
                       capacity: cap,
-                      availableSpots: cap,
+                      availableSpots: Math.min(draftEvent.availableSpots ?? cap, cap),
                     });
                   }}
+                />
+                <CampoTexto
+                  label="Vagas Disponíveis"
+                  type="number"
+                  value={String(draftEvent.availableSpots ?? draftEvent.capacity ?? 60)}
+                  onChange={(v) =>
+                    setDraftEvent({
+                      ...draftEvent,
+                      availableSpots: Math.max(0, Number(v) || 0),
+                    })
+                  }
                 />
               </div>
               <CampoTexto

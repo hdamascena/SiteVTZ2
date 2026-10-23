@@ -149,6 +149,7 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
   const [scoutFilterCategory, setScoutFilterCategory] = useState<string>('todas');
   const [scoutSearchQuery, setScoutSearchQuery] = useState<string>('');
   const [directEnrollProject, setDirectEnrollProject] = useState<VitalizarProject | null>(null);
+  const [directEnrollTeamId, setDirectEnrollTeamId] = useState<string | undefined>(undefined);
 
   // Direct Project Enrollment Form States
   const [enrollStudentName, setEnrollStudentName] = useState('');
@@ -432,7 +433,10 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
               setSelectedProject(null);
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            onEnrollDirect={(p) => setDirectEnrollProject(p)}
+            onEnrollDirect={(p, teamId) => {
+              setDirectEnrollProject(p);
+              setDirectEnrollTeamId(teamId);
+            }}
             onInspectPlayer={(p) => setSelectedPlayer(p)}
             onOpenScoutContact={(p) => {
               setScoutTargetPlayer(p);
@@ -454,8 +458,12 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
 
           <DirectEnrollmentModal
             isOpen={!!directEnrollProject}
-            onClose={() => setDirectEnrollProject(null)}
+            onClose={() => {
+              setDirectEnrollProject(null);
+              setDirectEnrollTeamId(undefined);
+            }}
             project={directEnrollProject}
+            initialTeamId={directEnrollTeamId}
           />
 
           <ScoutContactModal
@@ -505,7 +513,12 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                 <span className="flex items-center gap-1.5 font-bold text-[#0284c7]">
                   <FileSpreadsheet className="w-4 h-4 text-[#0284c7]" />
                   <span>
-                    {projects.reduce((acc, p) => acc + (p.availableSpots ?? 15), 0)} Vagas Abertas
+                    {projects.reduce(
+                      (acc, p) =>
+                        acc + Math.max(0, (p.totalSpots ?? 100) - (p.participants?.length || 0)),
+                      0
+                    )}{' '}
+                    Vagas Abertas
                   </span>
                 </span>
               </div>
@@ -538,10 +551,10 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
         {(
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {projects.map((proj) => {
-              const avail = proj.availableSpots ?? 20;
               const tot = proj.totalSpots ?? 100;
               const participantCount = proj.participants?.length || 0;
-              const fill = proj.filledSpots ?? participantCount ?? (tot - avail);
+              const fill = participantCount;
+              const avail = Math.max(0, tot - fill);
               const pct = Math.min(100, Math.round((fill / Math.max(1, tot)) * 100));
               const staffCount = proj.staff?.length || 0;
 
@@ -634,10 +647,10 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
                     <div className="grid grid-cols-3 gap-2 text-[11px] pt-1">
                       <div className="p-2 rounded-lg bg-sky-50/70 border border-sky-100/80">
                         <span className="text-[10px] font-bold uppercase text-[#0284c7] block truncate">
-                          Equipe
+                          Times / Turmas
                         </span>
                         <span className="font-semibold text-slate-800 truncate block mt-0.5">
-                          {staffCount > 0 ? `${staffCount} Prof.` : 'Ativa'}
+                          {proj.teams?.length ? `${proj.teams.length} Times` : `${staffCount} Prof.`}
                         </span>
                       </div>
 
@@ -765,8 +778,12 @@ export const SubpageView: React.FC<SubpageViewProps> = ({
 
               <DirectEnrollmentModal
                 isOpen={!!directEnrollProject}
-                onClose={() => setDirectEnrollProject(null)}
+                onClose={() => {
+                  setDirectEnrollProject(null);
+                  setDirectEnrollTeamId(undefined);
+                }}
                 project={directEnrollProject}
+                initialTeamId={directEnrollTeamId}
               />
 
               <ScoutContactModal

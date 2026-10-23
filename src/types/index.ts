@@ -114,12 +114,27 @@ export interface PlayerHighlightVideo {
   categoryTag?: string;
 }
 
+export interface ProjectTeamClass {
+  id: string;
+  name: string;
+  modality: string;
+  category: string;
+  gender: 'Feminino' | 'Masculino' | 'Misto';
+  schedule: string;
+  polo: string;
+  totalSpots: number;
+  filledSpots?: number;
+  availableSpots?: number;
+}
+
 export interface ProjectParticipant {
   id: string;
   name: string;
   nickname?: string;
   nextfitCode?: string;
   enrollmentStatus?: 'ativo' | 'trancado' | 'inativo' | 'pendente';
+  teamId?: string;
+  modality?: string;
   modalityOrClass?: string;
   planName?: string;
   bmi?: string;
@@ -189,6 +204,10 @@ export interface ProjectFunctioning {
 export interface VitalizarProject {
   id: string;
   name: string;
+  projectNumber?: string;
+  incentiveLaw?: string;
+  modalities?: string[];
+  teams?: ProjectTeamClass[];
   category:
     | 'esporte_educacional'
     | 'saude_qualidade_vida'
@@ -213,6 +232,55 @@ export interface VitalizarProject {
   participants?: ProjectParticipant[];
   tags?: string[];
   attachments?: AttachedFile[];
+}
+
+export function syncProjectSpotsAndTeams(project: VitalizarProject): VitalizarProject {
+  const participants = Array.isArray(project.participants) ? project.participants : [];
+  const rawTeams = Array.isArray(project.teams) ? project.teams : [];
+
+  const syncedTeams: ProjectTeamClass[] = rawTeams.map((team) => {
+    const teamTotal = Math.max(0, Number(team.totalSpots) || 0);
+    const teamFilled = participants.filter(
+      (p) =>
+        (p.enrollmentStatus || 'ativo') !== 'inativo' &&
+        (p.teamId === team.id || (!p.teamId && p.modalityOrClass === team.name))
+    ).length;
+    return {
+      ...team,
+      totalSpots: teamTotal,
+      filledSpots: teamFilled,
+      availableSpots: Math.max(0, teamTotal - teamFilled),
+    };
+  });
+
+  const derivedModalities = Array.from(
+    new Set([
+      ...(Array.isArray(project.modalities) ? project.modalities : []),
+      ...syncedTeams.map((t) => t.modality).filter(Boolean),
+    ])
+  );
+
+  const totalSpots =
+    syncedTeams.length > 0
+      ? syncedTeams.reduce((sum, t) => sum + t.totalSpots, 0)
+      : typeof project.totalSpots === 'number' && !Number.isNaN(project.totalSpots)
+      ? project.totalSpots
+      : 60;
+
+  const filledSpots = participants.filter(
+    (p) => (p.enrollmentStatus || 'ativo') !== 'inativo'
+  ).length;
+  const availableSpots = Math.max(0, totalSpots - filledSpots);
+
+  return {
+    ...project,
+    modalities: derivedModalities,
+    teams: syncedTeams,
+    participants,
+    totalSpots,
+    filledSpots,
+    availableSpots,
+  };
 }
 
 export interface VideoShowcase {

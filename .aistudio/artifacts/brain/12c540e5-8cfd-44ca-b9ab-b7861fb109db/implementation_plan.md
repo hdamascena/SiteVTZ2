@@ -1,99 +1,79 @@
-# Transformação em Vitrine Institucional e Esportiva (Associação Vitalizar)
+# Plano de Reestruturação: Projetos de Incentivo, Modalidades e Times/Turmas
 
-Reestruturação da plataforma para operar exclusivamente como uma vitrine institucional, esportiva e de transparência voltada a empresas patrocinadoras, clubes observadores, atletas e comunidade — removendo o sistema operacional de chamada de quadra, fichas privadas de responsáveis e perfis internos de turmas.
+## 1. Visão Geral e Objetivo
+Reestruturar os projetos da **Associação Esportiva Vitalizar** para refletir o funcionamento real de projetos submetidos a **Leis de Incentivo ao Esporte**, substituindo os projetos fictícios pelo projeto real **"É Mais do que Esporte, É Vida!" (Nº 2606344)** em Cariacica/ES (Bairro Rio Marinho).
 
-## User Review & Critical Decisions
-
-> [!IMPORTANT]
-> As decisões abaixo refletem o alinhamento confirmado para focar o portal como vitrine institucional e esportiva:
-
-- **Remoção Integral do Sistema de Chamada**: Exclusão do módulo de presença em quadra, alertas de faltas e coleções de sessões de chamada, pois o portal não é um diário de classe operacional.
-- **Vitrine de Atletas sem Dados Privados de Responsáveis**: Os perfis de atletas nos projetos exibem apenas informações públicas de vitrine esportiva (nome, apelido, categoria, posição, número da camisa, idade, atributos técnicos, destaques e parecer técnico de olheiros), eliminando o armazenamento e a exigência de dados privados sensíveis de responsáveis, saúde/IMC ou códigos internos de catraca.
-- **Formulário Público de Interesse em Projetos e Eventos**: Manutenção da captação pública de interessados em projetos sociais, eventos, voluntariado e contato de olheiros/empresas como canal de relacionamento institucional.
-- **Simplificação de Perfis do Painel**: Redução dos níveis de acesso para **Super Admin**, **Admin**, **Editor**, **Financeiro** e **Parceiro** (removendo os perfis operacionais `professor`, `visitante` e `apoiador`, e eliminando o cadastro avulso de visitantes no painel administrativo).
-
----
-
-## 1. Overview & Core Concept
-
-- **O que a Plataforma Faz**: Apresenta os projetos sociais e esportivos da Associação Vitalizar, vitrine técnica de atletas para clubes e olheiros, agenda de eventos, notícias, galeria de fotos, polos esportivos, portal de transparência fiscal e canais diretos para patrocínio empresarial, doações PIX e captação de talentos.
-- **Público-Alvo**:
-  - **Empresas e Patrocinadores**: Consultam impacto social, relatórios de transparência, marcas parceiras e formas de apoio/incentivo fiscal.
-  - **Clubes e Olheiros**: Exploram a vitrine de atletas por projeto e categoria, visualizam indicadores esportivos e enviam solicitações de observação técnica.
-  - **Atletas e Comunidade**: Conhecem os polos, horários, modalidades, eventos e manifestam interesse de participação.
-- **Valor Principal**: Interface enxuta, rápida e livre de burocracia escolar interna, destacando a credibilidade institucional e o talento esportivo dos participantes.
+A nova arquitetura organizará cada projeto na hierarquia:
+- **Projeto (Lei de Incentivo)** → contém múltiplas **Modalidades Esportivas** e múltiplos **Times / Turmas**.
+- **Time / Turma** → pertence a uma modalidade dentro do projeto, pode receber um nome próprio de **Time** (ex.: *Vitalizar Vôlei Sub-16 Feminino / Turma 1*), possui categoria/faixa etária, naipe (Feminino/Masculino/Misto), dias e horários de treino, local/polo de execução e seu próprio limite de vagas (`totalSpots`).
+- **Cálculo Automático de Vagas em Cascata**:
+  - Os atletas participantes (`participants`) e as inscrições públicas de interesse (`rsvps`) serão vinculados diretamente a um **Time / Turma** (`teamId`).
+  - As vagas preenchidas e disponíveis de cada **Time / Turma** são calculadas automaticamente a partir dos atletas vinculados àquele Time.
+  - O total de vagas preenchidas e disponíveis de cada **Modalidade** e do **Projeto** é a soma automática das vagas de seus respectivos Times/Turmas.
 
 ---
 
-## 2. User Experience & Visual Design
+## 2. Estrutura de Dados e Cadastro Oficial ("É Mais do que Esporte, É Vida!")
 
-- **Fluxos Principais**:
-  1. **Vitrine Pública**: Visitantes, clubes e empresas navegam livremente pelos Projetos, Vitrine de Atletas (cards esportivos com estatísticas e relatório de scout), Notícias, Eventos, Galeria, Polos e Portal da Transparência sem necessidade de criar conta.
-  2. **Captação de Interesse e Parcerias**: Formulários diretos permitem manifestar interesse em projetos/eventos, enviar propostas de observação técnica (olheiros), inscrever-se para ações voluntárias ou registrar apoio via PIX.
-  3. **Painel de Gestão da Vitrine**: Acesso restrito à equipe institucional (`Super Admin`, `Admin`, `Editor`, `Financeiro` e `Parceiro`), cada um visualizando apenas os módulos pertinentes à sua função.
-- **Identidade Visual & Tema**:
-  - *Direção Estética*: Editorial esportivo e institucional limpo, combinando superfícies claras de alto contraste (`#F8FAFC` / `#FFFFFF`) e modo escuro opcional no painel (`#0F172A`), com destaque em azul celeste institucional (`#0284C7`) e verde esmeralda (`#059669`).
-  - *Tipografia & Hierarquia*: Títulos estruturados com forte presença visual, metadados em texto limpo separado por pontos (`·`) sem excesso de etiquetas decorativas, e números tabulares (`tabular-nums`) em indicadores de vagas, estatísticas de atletas e valores financeiros.
-  - *Layout de Painel*: Barra lateral enxuta (`240px`) exibindo apenas os módulos de vitrine e relacionamento institucional, cabeçalho com busca rápida e tabelas de densidade limpa.
-- **Feedback Interativo**: Indicadores claros de salvamento nos painéis laterais de edição, confirmação de exclusão com opção de desfazer em 10 segundos e atualização imediata da vitrine pública.
+### 2.1. Modelagem (`src/types/index.ts`)
+- Adição da interface `ProjectTeamClass` (Time / Turma):
+  - `id`: identificador único da turma/time (ex.: `turma-1-volei-sub16-fem`)
+  - `name`: nome do Time ou Turma (ex.: `Turma 1 • Time Vôlei Sub-16 Feminino`)
+  - `modality`: modalidade esportiva (`Voleibol`, `Futsal`, etc.)
+  - `category`: faixa etária / categoria (`Sub-12`, `Sub-14`, `Sub-16`, `Sub-18`, `14 a 18 anos`)
+  - `gender`: `'Feminino' | 'Masculino' | 'Misto'`
+  - `schedule`: dias e horários (ex.: `Segundas e quintas-feiras, 19h às 20h30`)
+  - `polo`: local de treino (`EMEF São Jorge` ou `EEEFM Alzira Ramos`)
+  - `totalSpots`: número total de vagas da turma/time
+  - `filledSpots` / `availableSpots`: calculados automaticamente pelos atletas vinculados ao `teamId`
+- Atualização de `VitalizarProject`:
+  - `incentiveLaw?: string` (ex.: `Lei Federal de Incentivo ao Esporte – Lei nº 11.438/2006`)
+  - `projectNumber?: string` (ex.: `2606344`)
+  - `modalities?: string[]` (ex.: `['Voleibol', 'Futsal']`)
+  - `teams?: ProjectTeamClass[]` (lista de Times/Turmas do projeto)
+- Atualização de `ProjectParticipant` e `EventRsvpRecord`:
+  - Inclusão de `teamId?: string` e `modality?: string` para vincular o atleta ou inscrição diretamente ao Time/Turma escolhido.
+
+### 2.2. Projeto Real Inicial (`src/data/clubeData.ts`)
+Substituição dos projetos fictícios pelo projeto proposto:
+- **Projeto**: **É Mais do que Esporte, É Vida!** (Lei de Incentivo ao Esporte)
+- **Polos de Treino (Bairro Rio Marinho, Cariacica/ES)**:
+  - **EMEF São Jorge** (Avenida Principal, s/n, Rio Marinho)
+  - **EEEFM Alzira Ramos** (Avenida Principal, s/n, Rio Marinho)
+- **Modalidades e Times / Turmas (Total: 300 vagas em 12 Times/Turmas)**:
+  - **Voleibol (8 Times / Turmas — 180 vagas)**:
+    1. **Turma 1 – Sub-16 Feminino**: Segundas e quintas-feiras, 19h às 20h30 (24 vagas)
+    2. **Turma 2 – Sub-18 Feminino**: Segundas e quintas-feiras, 20h30 às 22h (24 vagas)
+    3. **Turma 3 – Sub-16 Masculino**: Quartas e sextas-feiras, 19h às 20h30 (24 vagas)
+    4. **Turma 4 – Sub-18 Masculino**: Quartas e sextas-feiras, 20h30 às 22h (24 vagas)
+    5. **Turma 5 – Sub-14 Feminino**: Sábados e domingos, 14h às 15h30 (24 vagas)
+    6. **Turma 6 – Sub-14 Masculino**: Sábados e domingos, 15h30 às 17h (24 vagas)
+    7. **Turma 7 – Sub-12 Feminino**: Sábados, 17h às 18h30 (18 vagas)
+    8. **Turma 8 – Sub-12 Masculino**: Sábados, 18h30 às 20h (18 vagas)
+  - **Futsal (4 Times / Turmas — 120 vagas)**:
+    9. **Turma 9 – Feminino (14 a 18 anos)**: Sextas-feiras, 19h às 20h30 (30 vagas)
+    10. **Turma 10 – Masculino (14 a 18 anos)**: Sextas-feiras, 20h30 às 22h (30 vagas)
+    11. **Turma 11 – Feminino (14 a 18 anos)**: Domingos, 17h às 18h30 (30 vagas)
+    12. **Turma 12 – Masculino (14 a 18 anos)**: Domingos, 18h30 às 20h (30 vagas)
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
+## 3. Alterações nas Telas Públicas e Painel Administrativo
 
-- **Decisão 1: Exclusão da Chamada e de Dados Privados de Responsáveis (`participant_private` e `attendance_sessions`)**
-  - *Abordagem Escolhida*: Remover a seção de Chamada na Quadra, remover os alertas de faltas na Visão Geral e simplificar o cadastro de Atletas da Vitrine para conter apenas dados públicos esportivos e pedagógicos gerais (categoria, posição, camisa, idade, atributos técnicos e resumo de scout).
-  - *Por quê*: Elimina complexidade operacional desnecessária e reduz drasticamente a superfície de dados pessoais sensíveis (LGPD de menores e responsáveis), alinhando o sistema ao propósito de vitrine.
-- **Decisão 2: Simplificação da Matriz de Perfis (5 Perfis Institucionais)**
-  - *Abordagem Escolhida*: Manter exclusivamente `super_admin`, `admin`, `editor`, `financeiro` e `parceiro`. Qualquer usuário legado com perfil removido (`professor`, `apoiador`, `visitante`) passa a ser tratado de forma segura ou convertido na gestão de equipe.
-  - *Por quê*: Visitantes e apoiadores interagem diretamente pela vitrine pública (sem necessidade de login), enquanto o painel administrativo fica 100% dedicado à equipe de gestão, comunicação, finanças e parceiros.
+### 3.1. Vitrine Pública (`ProjectDetailPage.tsx`, `SubpageView.tsx`, `DirectEnrollmentModal.tsx`)
+- **Página do Projeto (`ProjectDetailPage.tsx`)**:
+  - Exibição limpa e focada nas **Modalidades Esportivas**, **Times / Turmas**, **Vagas (Preenchidas / Disponíveis por Time e Geral)** e **Locais de Treino (Polos)**.
+  - Filtro de Times/Turmas por modalidade (ex.: Todos, Voleibol, Futsal) com visualização de horários, faixa etária, vagas restantes em cada Time e botão para inscrição direto naquele Time/Turma.
+  - Filtro na Vitrine de Atletas também por Modalidade e por Time/Turma.
+- **Modal de Inscrição (`DirectEnrollmentModal.tsx`)**:
+  - Ao escolher um projeto, o candidato seleciona a **Modalidade** e o **Time / Turma** específico (exibindo horário e vagas disponíveis daquele Time).
+- **Menus e Subpáginas (`clubeData.ts` e `SubpageView.tsx`)**:
+  - Atualização da navegação e listagens para exibir o projeto real, suas modalidades, polos (EMEF São Jorge e EEEFM Alzira Ramos) e quadros de horários por Time/Turma.
 
----
-
-## 4. Technical Architecture & Data Strategy
-
-### Diagrama de Arquitetura e Módulos
-
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                     VITRINE PÚBLICA (Acesso Livre)                           │
-│  ┌────────────────┐ ┌────────────────┐ ┌────────────────┐ ┌───────────────┐  │
-│  │ Projetos &     │ │ Notícias,      │ │ Portal da      │ │ Captação:     │  │
-│  │ Vitrine Atletas│ │ Eventos & Polos│ │ Transparência  │ │ Olheiros/PIX  │  │
-│  └───────┬────────┘ └───────┬────────┘ └───────┬────────┘ └───────┬───────┘  │
-└──────────┼──────────────────┼──────────────────┼──────────────────┼──────────┘
-           │                  │                  │                  │
-           ▼                  ▼                  ▼                  ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                 ESTADO CENTRAL & SINCRONIZAÇÃO (SQL + Firestore)             │
-│  • Coleções de Vitrine: projects, news_articles, events, gallery_albums,     │
-│    sponsors, facility_polos, transparency_docs, club_info, site_settings     │
-│  • Coleções de Relacionamento: rsvps (interesse), scout_inquiries,           │
-│    contact_messages, donation_pledges, volunteer_applications                │
-└──────────┬──────────────────┬──────────────────┬──────────────────┬──────────┘
-           │                  │                  │                  │
-           ▼                  ▼                  ▼                  ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│               PAINEL DE GESTÃO DA VITRINE (RBAC Simplificado)                │
-│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────┐ ┌──────────────┐ │
-│  │ Super Admin /    │ │ Editor           │ │ Financeiro   │ │ Parceiro     │ │
-│  │ Admin            │ │                  │ │              │ │              │ │
-│  │ • Controle Total │ │ • Projetos/Atleta│ │ • Doações PIX│ │ • Marcas     │ │
-│  │ • Interesses     │ │ • Notícias/Agenda│ │ • Relatórios │ │   Parceiras  │ │
-│  │ • Comunidade     │ │ • Galeria/Polos  │ │   Fiscais    │ │ • Captação & │ │
-│  │ • Equipe & Logs  │ │ • Avisos do Site │ │ • Chave PIX  │ │   Olheiros   │ │
-│  └──────────────────┘ └──────────────────┘ └──────────────┘ └──────────────┘ │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Modelo de Dados e Mapeamento de Interações
-
-- **Visão Geral do Painel**:
-  - Exibe indicadores executivos da vitrine (Projetos Ativos, Atletas na Vitrine, Manifestações de Interesse em Projetos/Eventos, Solicitações de Olheiros, Documentos de Transparência e Doações PIX), com atalhos diretos para cada seção conforme o perfil logado.
-- **Gestão de Atletas da Vitrine (antigo Participantes)**:
-  - Permite a `Super Admin`, `Admin` e `Editor` adicionar, editar, importar via planilha CSV e remover fichas públicas de atletas nos projetos (nome, apelido, foto, categoria, posição, número da camisa, idade, overall/atributos e destaque para olheiros), atualizando diretamente a lista pública do projeto.
-- **Manifestações de Interesse (Inscrições em Projetos e Eventos)**:
-  - Registra o interesse enviado pelo formulário público e permite à coordenação (`Super Admin` e `Admin`) acompanhar o status ou converter diretamente um atleta aprovado para a vitrine do projeto.
-- **Segurança & Regras de Acesso**:
-  - Remoção das rotas e regras de `attendance_sessions` e `participant_private` no cliente, servidor Express/Cloud SQL e `firestore.rules`.
-  - Bloqueio do formulário de auto-cadastro de visitantes na tela de login administrativo, mantendo apenas autenticação da equipe autorizada e parceiros convidados.
+### 3.2. Painel Administrativo (`ConteudoView.tsx`, `ParticipantesView.tsx`, `InscricoesProjetosView.tsx`)
+- **Editor de Projetos (`ConteudoView.tsx`)**:
+  - Gerenciador de **Modalidades** e **Times / Turmas** dentro de cada projeto: adicionar, renomear Time/Turma, definir modalidade, categoria, dias/horários, polo e número de vagas (`totalSpots`) de cada Time.
+  - O total de vagas do projeto passa a ser calculado automaticamente pela soma das vagas de seus Times/Turmas.
+- **Gestão de Atletas (`ParticipantesView.tsx`) e Inscrições (`InscricoesProjetosView.tsx`)**:
+  - Seleção de qual **Time / Turma** o atleta pertence ao cadastrar, editar ou aprovar uma inscrição pública.
+  - Ao aprovar uma inscrição vinculada a um Time/Turma, o atleta entra automaticamente naquele Time, atualizando na hora as vagas preenchidas/disponíveis do Time e do Projeto.
