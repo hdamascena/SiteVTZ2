@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   LayoutDashboard,
   FileCheck2,
-  CheckSquare,
   Users,
   FolderKanban,
   Newspaper,
@@ -25,26 +24,23 @@ import {
   RotateCcw,
   Lock,
   Loader2,
-  UserPlus,
 } from 'lucide-react';
-import type { AdminRole, AdminSectionId, AdminUserProfile } from '../admin/types.ts';
+import type { AdminRole, AdminSectionId } from '../admin/types.ts';
 import {
   ROLE_LABELS,
   ROLE_SECTIONS,
   canAccessSection,
   isStaffRole,
-  resolveProjectIdFromRsvp,
 } from '../admin/permissions.ts';
 import { useClubData } from '../context/ClubDataContext.tsx';
 import {
   loginWithGoogleAdmin,
   loginWithEmailPasswordFirebase,
-  registerVisitorWithEmailFirebase,
+  registerInvitedWithEmailFirebase,
   sendPasswordResetFirebase,
   logoutFirebaseAuth,
 } from '../services/firebaseService.ts';
 import { DashboardHome } from '../admin/views/DashboardHome.tsx';
-import { ChamadaQuadraView } from '../admin/views/ChamadaQuadraView.tsx';
 import { InscricoesProjetosView } from '../admin/views/InscricoesProjetosView.tsx';
 import { ParticipantesView } from '../admin/views/ParticipantesView.tsx';
 import { ComunidadeView } from '../admin/views/ComunidadeView.tsx';
@@ -61,9 +57,8 @@ const SECTION_META: Record<
   { label: string; icon: React.ComponentType<{ className?: string }> }
 > = {
   'visao-geral': { label: 'Visão Geral', icon: LayoutDashboard },
-  inscricoes: { label: 'Inscrições nos Projetos', icon: FileCheck2 },
-  chamada: { label: 'Chamada na Quadra', icon: CheckSquare },
-  participantes: { label: 'Participantes (Alunos)', icon: Users },
+  inscricoes: { label: 'Interesses & Inscrições', icon: FileCheck2 },
+  participantes: { label: 'Atletas da Vitrine', icon: Users },
   projetos: { label: 'Projetos Sociais', icon: FolderKanban },
   noticias: { label: 'Notícias', icon: Newspaper },
   eventos: { label: 'Agenda de Eventos', icon: Calendar },
@@ -78,13 +73,6 @@ const SECTION_META: Record<
 };
 
 function getSectionLabelForRole(section: AdminSectionId, role: AdminRole): string {
-  if (role === 'visitante' || role === 'apoiador') {
-    if (section === 'inscricoes') return 'Minhas Inscrições';
-    if (section === 'comunidade') return 'Minhas Doações PIX';
-  }
-  if (role === 'professor' && section === 'projetos') {
-    return 'Minhas Turmas';
-  }
   if (role === 'financeiro') {
     if (section === 'comunidade') return 'Doações & Apoiadores';
     if (section === 'configuracoes') return 'Configuração PIX';
@@ -282,57 +270,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen = true, onClose }
     }[] = [];
 
     if (canAccessSection(role, 'participantes')) {
-      projects
-        .filter((p) =>
-          role === 'professor'
-            ? (currentUserProfile.projectIds || []).includes(p.id)
-            : true
-        )
-        .forEach((p) => {
-          (p.participants || []).forEach((pt) => {
-            if (pt.name.toLowerCase().includes(q)) {
-              items.push({
-                id: `pt-${pt.id}`,
-                title: pt.name,
-                subtitle: `Aluno · ${p.name}`,
-                section: 'participantes',
-              });
-            }
-          });
-        });
-    }
-
-    if (canAccessSection(role, 'inscricoes')) {
-      rsvps
-        .filter((r) => {
-          if (role === 'visitante' || role === 'apoiador') {
-            return (
-              (r.userId && r.userId === currentUserProfile.uid) ||
-              (r.email &&
-                r.email.trim().toLowerCase() ===
-                  (currentUserProfile.email || '').trim().toLowerCase())
-            );
-          }
-          if (role === 'professor') {
-            const pid = resolveProjectIdFromRsvp(r, projects);
-            return Boolean(pid && (currentUserProfile.projectIds || []).includes(pid));
-          }
-          return true;
-        })
-        .forEach((r) => {
-          const name = r.studentName || r.name || '';
-          if (
-            name.toLowerCase().includes(q) ||
-            (r.eventTitle || '').toLowerCase().includes(q)
-          ) {
+      projects.forEach((p) => {
+        (p.participants || []).forEach((pt) => {
+          if (pt.name.toLowerCase().includes(q)) {
             items.push({
-              id: `rsvp-${r.id}`,
-              title: name,
-              subtitle: `Inscrição · ${r.eventTitle}`,
-              section: 'inscricoes',
+              id: `pt-${pt.id}`,
+              title: pt.name,
+              subtitle: `Atleta · ${p.name}`,
+              section: 'participantes',
             });
           }
         });
+      });
+    }
+
+    if (canAccessSection(role, 'inscricoes')) {
+      rsvps.forEach((r) => {
+        const name = r.studentName || r.name || '';
+        if (
+          name.toLowerCase().includes(q) ||
+          (r.eventTitle || '').toLowerCase().includes(q)
+        ) {
+          items.push({
+            id: `rsvp-${r.id}`,
+            title: name,
+            subtitle: `Interesse / Inscrição · ${r.eventTitle}`,
+            section: 'inscricoes',
+          });
+        }
+      });
     }
 
     if (canAccessSection(role, 'noticias')) {
@@ -424,7 +390,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen = true, onClose }
     setAuthSubmitting(true);
     try {
       if (authMode === 'register') {
-        await registerVisitorWithEmailFirebase(
+        await registerInvitedWithEmailFirebase(
           nameInput,
           emailInput,
           passwordInput
@@ -497,11 +463,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen = true, onClose }
             <div className="flex items-center gap-2 truncate">
               <span className="w-2.5 h-2.5 rounded-full bg-[#0284c7] shrink-0" />
               <span className="font-extrabold text-sm tracking-tight truncate">
-                {currentUserProfile &&
-                (currentUserProfile.role === 'visitante' ||
-                  currentUserProfile.role === 'apoiador')
-                  ? 'Vitalizar · Área do Inscrito & Apoiador'
-                  : 'Vitalizar · Painel de Gestão & Comunidade'}
+                Vitalizar · Painel da Vitrine Institucional
               </span>
             </div>
           </div>
@@ -635,8 +597,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen = true, onClose }
                 </h1>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   {authMode === 'login'
-                    ? 'Entre com sua conta Google ou com e-mail e senha cadastrados.'
-                    : 'Defina sua senha de acesso (o e-mail principal da coordenação recebe perfil Super Admin automaticamente; demais contas entram conforme convite ou como Visitante).'}
+                    ? 'Entre com sua conta Google ou com e-mail e senha autorizados.'
+                    : 'Defina sua senha de primeiro acesso para e-mails previamente convidados em /admin_invites ou para a coordenação principal.'}
                 </p>
               </div>
 
@@ -819,13 +781,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen = true, onClose }
                   <DashboardHome
                     profile={currentUserProfile}
                     onNavigate={navigateToSection}
-                  />
-                )}
-
-                {activeSection === 'chamada' && (
-                  <ChamadaQuadraView
-                    profile={currentUserProfile}
-                    initialProjectId={sectionQuery.projectId}
                   />
                 )}
 

@@ -1,6 +1,6 @@
 {
-  "summary":  "Plano de implementação atualizado incluindo os perfis Visitante, Apoiador (promovido por doação) e Parceiro, além do módulo completo de Gestão de Inscrições nos Projetos com conversão em participante e controle de vagas.",
-  "updatedAt":  "2026-10-21T20:21:14.481495374Z",
+  "summary":  "Implementation plan to transform the application into an institutional and athletic showcase (vitrine) by removing the court attendance system, removing private LGPD parent/health records from athlete profiles, and simplifying access roles to Super Admin, Admin, Editor, Financeiro, and Parceiro.",
+  "updatedAt":  "2026-10-23T02:39:49.080814243Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

@@ -45,17 +45,18 @@ import {
   canExportSensitiveCsv,
   maskPhone,
   maskEmail,
-  splitParticipantPublicAndPrivate,
+  sanitizeShowcaseParticipant,
 } from '../admin/permissions.ts';
 
 test('RBAC permissions and LGPD masking', () => {
   assert.strictEqual(canExportSensitiveCsv('super_admin'), true);
   assert.strictEqual(canExportSensitiveCsv('admin'), true);
-  assert.strictEqual(canExportSensitiveCsv('professor'), false);
-  assert.strictEqual(canExportSensitiveCsv('editor'), false);
-  assert.strictEqual(canAccessSection('professor', 'chamada'), true);
-  assert.strictEqual(canAccessSection('professor', 'usuarios'), false);
-  assert.strictEqual(canAccessSection('apoiador', 'inscricoes'), true);
+  assert.strictEqual(canExportSensitiveCsv('editor'), true);
+  assert.strictEqual(canExportSensitiveCsv('parceiro'), false);
+  assert.strictEqual(canAccessSection('editor', 'participantes'), true);
+  assert.strictEqual(canAccessSection('editor', 'usuarios'), false);
+  assert.strictEqual(canAccessSection('parceiro', 'comunidade'), true);
+  assert.strictEqual(canAccessSection('financeiro', 'transparencia'), true);
 
   assert.strictEqual(maskPhone('(27) 99823-1144'), '(27) *****-1144');
   assert.strictEqual(maskEmail('joao.silva@gmail.com'), 'jo***@gmail.com');
@@ -70,12 +71,9 @@ test('RBAC permissions and LGPD masking', () => {
     nextfitCode: 'NF-100',
     schoolInfo: { schoolName: 'EMEF Cariacica', grade: '8º ano', turn: 'Matutino', attendanceRate: '98%' },
   };
-  const { publicParticipant, privateRecord } = splitParticipantPublicAndPrivate(sample, 'proj-1');
+  const publicParticipant = sanitizeShowcaseParticipant(sample);
   assert.strictEqual(publicParticipant.birthDate, '');
   assert.strictEqual(publicParticipant.weight, '');
   assert.strictEqual(publicParticipant.schoolInfo.schoolName, '');
-  assert.strictEqual(privateRecord.birthDate, '2012-05-10');
-  assert.strictEqual(privateRecord.weight, '52kg');
-  assert.strictEqual(privateRecord.schoolInfo?.schoolName, 'EMEF Cariacica');
 });
 

@@ -80,7 +80,6 @@ import { PlayerScoutModal } from './PlayerScoutModal.tsx';
 import { DirectEnrollmentModal } from './DirectEnrollmentModal.tsx';
 import { ScoutContactModal } from './ScoutContactModal.tsx';
 import { CommunityHubView, type CommunityHubTab } from './CommunityHubView.tsx';
-import { NextFitParticipantsManager } from './NextFitParticipantsManager.tsx';
 
 interface SubpageViewProps {
   pageId: string;

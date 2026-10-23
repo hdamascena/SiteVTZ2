@@ -1,90 +1,99 @@
-# Plano de Reconstrução do Painel Administrativo — Associação Esportiva Vitalizar
+# Transformação em Vitrine Institucional e Esportiva (Associação Vitalizar)
 
-## 1. Objetivo e Visão Geral
-Reconstruir integralmente o Painel Administrativo em uma arquitetura modular (`src/admin/...`), compacta, rápida e em conformidade com a LGPD para proteção de dados de crianças e adolescentes. O painel contará com controle de acesso baseado em **8 perfis** (equipe interna + comunidade/parceiros), promoção automática/assistida de **Visitante** para **Apoiador** ao realizar doação, área dedicada para **Parceiros**, gestão completa do ciclo de **Inscrições nos Projetos** (da solicitação à matrícula na turma), separação física dos dados sensíveis em coleção privada no Firestore, log de auditoria imutável e alternância entre modo claro e escuro no topo.
+Reestruturação da plataforma para operar exclusivamente como uma vitrine institucional, esportiva e de transparência voltada a empresas patrocinadoras, clubes observadores, atletas e comunidade — removendo o sistema operacional de chamada de quadra, fichas privadas de responsáveis e perfis internos de turmas.
 
----
+## User Review & Critical Decisions
 
-## 2. Perfis de Acesso (RBAC) e Fluxo de Convites / Cadastro
+> [!IMPORTANT]
+> As decisões abaixo refletem o alinhamento confirmado para focar o portal como vitrine institucional e esportiva:
 
-### 2.1 Perfis da Equipe Interna (`/admins/{uid}`)
-- **`super_admin`** (`higor.rock2011@gmail.com`): acesso total, incluindo gestão de todos os usuários, convites, perfis e configurações críticas.
-- **`admin`** (coordenação/diretoria): acesso a todo o conteúdo, gestão de inscrições nos projetos, aprovação de doações/apoiadores, parceiros e dados sensíveis. Não pode criar nem alterar `super_admin`.
-- **`editor`** (comunicação): gerencia notícias, eventos, galeria, patrocinadores, banners e páginas institucionais. Nunca visualiza dados pessoais ou sensíveis.
-- **`professor`**: restrito aos projetos listados em `projectIds`. Visualiza e gerencia as **inscrições nos seus projetos**, edita participantes da turma, realiza chamadas em `attendance_sessions` e consulta `rsvps`. Não importa nem exporta CSV de menores, não apaga registros e não vê doações nem mensagens gerais.
-- **`financeiro`**: leitura e conferência de `transparency_docs`, configuração do PIX e gestão/confirmação de registros em `donation_pledges` (incluindo validação que promove o doador ao perfil `apoiador`).
-
-### 2.2 Perfis da Comunidade e Rede Externa (`/admins/{uid}`)
-- **`visitante`**:
-  - Perfil inicial para qualquer pessoa autenticada sem convite de equipe interna (auto-registro seguro como `role: 'visitante'`).
-  - Pode realizar e acompanhar suas próprias **inscrições em projetos e eventos**, atualizar seus dados básicos de contato e registrar doações via PIX.
-- **`apoiador`** *(concedido aos visitantes que fizeram doação)*:
-  - Quando um `visitante` registra uma doação em `donation_pledges` (automaticamente ao registrar doação vinculada à conta ou ao ter a doação confirmada por `admin`/`financeiro`), seu perfil é atualizado para `apoiador`.
-  - Conta com selo oficial **"Apoiador Vitalizar"**, histórico de doações realizadas, recibos/comprovantes de apoio e painel de acompanhamento do impacto social e transparência financeira.
-- **`parceiro`** *(patrocinadores, instituições parceiras e clubes/olheiros credenciados)*:
-  - Atribuído via convite (`/admin_invites/{email}`) ou promoção por `admin`/`super_admin`.
-  - Acessa visão dedicada com indicadores de impacto dos projetos apoiados, documentos de prestação de contas, atualização dos dados institucionais da sua marca parceira e acompanhamento de solicitações técnicas (`scout_inquiries`).
-
-### 2.3 Fluxo de Convite e Auto-Cadastro
-- **Equipe e Parceiros via Convite (`/admin_invites/{email}`)**:
-  - `admin` ou `super_admin` cadastra o e-mail e o perfil (`admin`, `editor`, `professor`, `financeiro`, `parceiro`) em `/admin_invites/{email}`.
-  - No primeiro login com e-mail verificado, o usuário cria `/admins/{uid}` com o perfil exato do convite.
-- **Visitante e Promoção para Apoiador**:
-  - Usuário autenticado sem convite pode criar seu próprio `/admins/{uid}` apenas com `role: 'visitante'` e `ativo: true`.
-  - Ao registrar doação em `donation_pledges` (ou quando `admin`/`financeiro`/`super_admin` confirma a doação), o perfil passa para `role: 'apoiador'`.
-- **Bloqueio Imediato**: alterar `ativo: false` bloqueia o acesso imediatamente nas regras do Firestore e na interface.
+- **Remoção Integral do Sistema de Chamada**: Exclusão do módulo de presença em quadra, alertas de faltas e coleções de sessões de chamada, pois o portal não é um diário de classe operacional.
+- **Vitrine de Atletas sem Dados Privados de Responsáveis**: Os perfis de atletas nos projetos exibem apenas informações públicas de vitrine esportiva (nome, apelido, categoria, posição, número da camisa, idade, atributos técnicos, destaques e parecer técnico de olheiros), eliminando o armazenamento e a exigência de dados privados sensíveis de responsáveis, saúde/IMC ou códigos internos de catraca.
+- **Formulário Público de Interesse em Projetos e Eventos**: Manutenção da captação pública de interessados em projetos sociais, eventos, voluntariado e contato de olheiros/empresas como canal de relacionamento institucional.
+- **Simplificação de Perfis do Painel**: Redução dos níveis de acesso para **Super Admin**, **Admin**, **Editor**, **Financeiro** e **Parceiro** (removendo os perfis operacionais `professor`, `visitante` e `apoiador`, e eliminando o cadastro avulso de visitantes no painel administrativo).
 
 ---
 
-## 3. Gestão Completa de Inscrições nos Projetos
-- **Fluxo de Ponta a Ponta (`rsvps` / `project_enrollments`)**:
-  - Cada inscrição em projeto armazena: `projectId`, `projectName`, `modalityOrClass`, dados do aluno/participante, responsável (quando menor), contato (mascarado por LGPD), `status` (`pendente` | `em_analise` | `aprovada` | `lista_espera` | `recusada`), `userId` (do visitante/apoiador que inscreveu) e `createdAt`.
-- **Painel de Gestão de Inscrições (`src/admin/views/InscricoesProjetosView.tsx`)**:
-  - Acessível para `super_admin`, `admin` (todos os projetos) e `professor` (apenas projetos em `projectIds`), além da visão "Minhas Inscrições" para `visitante` e `apoiador`.
-  - Filtros rápidos por **Projeto**, **Turma/Modalidade**, **Status da Inscrição** (`Pendente`, `Em Análise`, `Aprovada`, `Lista de Espera`, `Recusada`) e busca por nome/protocolo.
-  - **Matrícula em 1 Clique ("Aprovar e Matricular na Turma")**:
-    - Ao aprovar uma inscrição de projeto, o sistema cria/atualiza o participante público em `/projects/{projectId}` (atualizando automaticamente a ocupação de vagas `filledSpots` / `availableSpots`) e grava os dados sensíveis em `/participant_private/{participantId}`, registrando a ação em `audit_logs`.
-    - Se a turma estiver lotada, permite mover para **Lista de Espera** com registro de prioridade.
+## 1. Overview & Core Concept
+
+- **O que a Plataforma Faz**: Apresenta os projetos sociais e esportivos da Associação Vitalizar, vitrine técnica de atletas para clubes e olheiros, agenda de eventos, notícias, galeria de fotos, polos esportivos, portal de transparência fiscal e canais diretos para patrocínio empresarial, doações PIX e captação de talentos.
+- **Público-Alvo**:
+  - **Empresas e Patrocinadores**: Consultam impacto social, relatórios de transparência, marcas parceiras e formas de apoio/incentivo fiscal.
+  - **Clubes e Olheiros**: Exploram a vitrine de atletas por projeto e categoria, visualizam indicadores esportivos e enviam solicitações de observação técnica.
+  - **Atletas e Comunidade**: Conhecem os polos, horários, modalidades, eventos e manifestam interesse de participação.
+- **Valor Principal**: Interface enxuta, rápida e livre de burocracia escolar interna, destacando a credibilidade institucional e o talento esportivo dos participantes.
 
 ---
 
-## 4. Proteção de Dados Pessoais (LGPD) e Classificação da Informação
-- **Três níveis de classificação (`público`, `interno`, `sensível`)**:
-  - **Selo Visual**: `<SeloSensivel />` ao lado de cada campo sensível (dados de menores, saúde/IMC/peso, escola, data de nascimento, telefone, e-mail, doações e chamada).
-  - **Máscara com Auditoria**: Telefone e e-mail ficam ocultos com máscara até o usuário autorizado clicar em **"Mostrar"**, ação que grava imediatamente um registro em `audit_logs`.
-- **Separação em Coleção Privada (`/participant_private/{participantId}`)**:
-  - `/projects/{projectId}` (público) mantém apenas dados públicos de vitrine dos atletas (nome, apelido, foto, posição, camisa, categoria, atributos esportivos, vídeos e fotos).
-  - `/participant_private/{participantId}` (privado) guarda `birthDate`, `weight`, `height`, `bmi`, `schoolInfo`, `nextfitCode`, `planName`, contatos do responsável e observações pedagógicas/saúde.
-- **Remoção de Ferramentas de Admin do Site Público**:
-  - `ProjectDetailPage.tsx`, `SubpageView.tsx`, `PlayerCard.tsx` e `PlayerScoutModal.tsx` exibem apenas informações públicas para visitantes, removendo importação/exportação CSV, transferência de alunos e tabelas com dados escolares/biométricos.
-- **Importação e Exportação CSV (NextFit)**:
-  - Restritas exclusivamente a `admin` e `super_admin`, com gravação obrigatória em `audit_logs`.
+## 2. User Experience & Visual Design
+
+- **Fluxos Principais**:
+  1. **Vitrine Pública**: Visitantes, clubes e empresas navegam livremente pelos Projetos, Vitrine de Atletas (cards esportivos com estatísticas e relatório de scout), Notícias, Eventos, Galeria, Polos e Portal da Transparência sem necessidade de criar conta.
+  2. **Captação de Interesse e Parcerias**: Formulários diretos permitem manifestar interesse em projetos/eventos, enviar propostas de observação técnica (olheiros), inscrever-se para ações voluntárias ou registrar apoio via PIX.
+  3. **Painel de Gestão da Vitrine**: Acesso restrito à equipe institucional (`Super Admin`, `Admin`, `Editor`, `Financeiro` e `Parceiro`), cada um visualizando apenas os módulos pertinentes à sua função.
+- **Identidade Visual & Tema**:
+  - *Direção Estética*: Editorial esportivo e institucional limpo, combinando superfícies claras de alto contraste (`#F8FAFC` / `#FFFFFF`) e modo escuro opcional no painel (`#0F172A`), com destaque em azul celeste institucional (`#0284C7`) e verde esmeralda (`#059669`).
+  - *Tipografia & Hierarquia*: Títulos estruturados com forte presença visual, metadados em texto limpo separado por pontos (`·`) sem excesso de etiquetas decorativas, e números tabulares (`tabular-nums`) em indicadores de vagas, estatísticas de atletas e valores financeiros.
+  - *Layout de Painel*: Barra lateral enxuta (`240px`) exibindo apenas os módulos de vitrine e relacionamento institucional, cabeçalho com busca rápida e tabelas de densidade limpa.
+- **Feedback Interativo**: Indicadores claros de salvamento nos painéis laterais de edição, confirmação de exclusão com opção de desfazer em 10 segundos e atualização imediata da vitrine pública.
 
 ---
 
-## 5. Regras de Segurança do Firestore (`firestore.rules`)
-- Funções centrais:
-  - `role()`: lê `/admins/$(request.auth.uid).data.role` (ou `'super_admin'` para `higor.rock2011@gmail.com`).
-  - `isActive()`: verifica se o usuário está autenticado e ativo.
-  - `hasRole(roles)`: verifica se o perfil ativo pertence à lista `roles`.
-  - `teachesProject(projectId)`: verifica se `role() == 'professor'` e `projectId` está em `projectIds`.
-- Permissões para os novos perfis:
-  - `visitante` e `apoiador`: podem criar inscrições (`rsvps`) e doações (`donation_pledges`) e ler os seus próprios registros (`resource.data.userId == request.auth.uid` ou `resource.data.email == request.auth.token.email`); `visitante` pode atualizar seu próprio perfil para `apoiador` mediante doação registrada, e `admin`/`financeiro`/`super_admin` também podem promover/gerenciar.
-  - `parceiro`: lê relatórios de transparência, projetos e acompanha suas solicitações em `scout_inquiries` / parcerias.
-  - `professor`: lê e atualiza inscrições (`rsvps`) e dados de participantes dos projetos em que `teachesProject(projectId)` é verdadeiro.
-- Tabela completa `perfil × coleção × permissão` documentada em comentário ao final de `firestore.rules` e implantada via deploy de regras.
+## 3. Key Product Decisions & Trade-Offs
+
+- **Decisão 1: Exclusão da Chamada e de Dados Privados de Responsáveis (`participant_private` e `attendance_sessions`)**
+  - *Abordagem Escolhida*: Remover a seção de Chamada na Quadra, remover os alertas de faltas na Visão Geral e simplificar o cadastro de Atletas da Vitrine para conter apenas dados públicos esportivos e pedagógicos gerais (categoria, posição, camisa, idade, atributos técnicos e resumo de scout).
+  - *Por quê*: Elimina complexidade operacional desnecessária e reduz drasticamente a superfície de dados pessoais sensíveis (LGPD de menores e responsáveis), alinhando o sistema ao propósito de vitrine.
+- **Decisão 2: Simplificação da Matriz de Perfis (5 Perfis Institucionais)**
+  - *Abordagem Escolhida*: Manter exclusivamente `super_admin`, `admin`, `editor`, `financeiro` e `parceiro`. Qualquer usuário legado com perfil removido (`professor`, `apoiador`, `visitante`) passa a ser tratado de forma segura ou convertido na gestão de equipe.
+  - *Por quê*: Visitantes e apoiadores interagem diretamente pela vitrine pública (sem necessidade de login), enquanto o painel administrativo fica 100% dedicado à equipe de gestão, comunicação, finanças e parceiros.
 
 ---
 
-## 6. Arquitetura Modular e Interface (`src/admin/...`)
-- **Componentes Reutilizáveis**:
-  - `src/admin/components/Tabela.tsx`: tabela compacta com ordenação, busca e filtros.
-  - `src/admin/components/PainelLateral.tsx`: edição lateral rápida com indicador `"Salvando…"` / `"Salvo"` por item.
-  - `src/admin/components/CampoTexto.tsx`: campo com suporte a `<SeloSensivel />` e máscara auditada.
-  - `src/admin/components/ConfirmarExclusao.tsx`: confirmação digitando o nome do item + Toast com **"Desfazer"** por 10 segundos.
-- **Telas por Módulo e Perfil**:
-  - `DashboardHome.tsx`: visão adaptada para `super_admin`/`admin` (pendências, inscrições novas, mensagens, doações), `professor` ("Minhas turmas hoje", chamada rápida, inscrições pendentes da turma, alunos com faltas recentes), `editor` (rascunhos e publicações), `financeiro` (doações PIX, apoiadores e transparência), `parceiro` (impacto dos projetos, transparência e solicitações técnicas) e `visitante`/`apoiador` (minhas inscrições nos projetos, certificado/selo de Apoiador e histórico de doações).
-  - `InscricoesProjetosView.tsx`: gerenciamento completo de inscrições nos projetos, vagas por turma, aprovação com matrícula automática e lista de espera.
-  - `ChamadaQuadraView.tsx`: chamada mobile rápida para professores na quadra (1 aluno por linha, botões grandes Presente / Falta / Justificada, salvar com 1 toque).
-  - `ParticipantesView.tsx`: fichas completas dos alunos (público + `/participant_private`) e CSV restrito a `admin`/`super_admin`.
-  - `ConteudoView.tsx`, `ComunidadeView.tsx` (incluindo gestão de Apoiadores e Parceiros) e `UsuariosLogView.tsx` (gestão de todos os 8 perfis, convites e auditoria filtrável).
+## 4. Technical Architecture & Data Strategy
+
+### Diagrama de Arquitetura e Módulos
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                     VITRINE PÚBLICA (Acesso Livre)                           │
+│  ┌────────────────┐ ┌────────────────┐ ┌────────────────┐ ┌───────────────┐  │
+│  │ Projetos &     │ │ Notícias,      │ │ Portal da      │ │ Captação:     │  │
+│  │ Vitrine Atletas│ │ Eventos & Polos│ │ Transparência  │ │ Olheiros/PIX  │  │
+│  └───────┬────────┘ └───────┬────────┘ └───────┬────────┘ └───────┬───────┘  │
+└──────────┼──────────────────┼──────────────────┼──────────────────┼──────────┘
+           │                  │                  │                  │
+           ▼                  ▼                  ▼                  ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                 ESTADO CENTRAL & SINCRONIZAÇÃO (SQL + Firestore)             │
+│  • Coleções de Vitrine: projects, news_articles, events, gallery_albums,     │
+│    sponsors, facility_polos, transparency_docs, club_info, site_settings     │
+│  • Coleções de Relacionamento: rsvps (interesse), scout_inquiries,           │
+│    contact_messages, donation_pledges, volunteer_applications                │
+└──────────┬──────────────────┬──────────────────┬──────────────────┬──────────┘
+           │                  │                  │                  │
+           ▼                  ▼                  ▼                  ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│               PAINEL DE GESTÃO DA VITRINE (RBAC Simplificado)                │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────┐ ┌──────────────┐ │
+│  │ Super Admin /    │ │ Editor           │ │ Financeiro   │ │ Parceiro     │ │
+│  │ Admin            │ │                  │ │              │ │              │ │
+│  │ • Controle Total │ │ • Projetos/Atleta│ │ • Doações PIX│ │ • Marcas     │ │
+│  │ • Interesses     │ │ • Notícias/Agenda│ │ • Relatórios │ │   Parceiras  │ │
+│  │ • Comunidade     │ │ • Galeria/Polos  │ │   Fiscais    │ │ • Captação & │ │
+│  │ • Equipe & Logs  │ │ • Avisos do Site │ │ • Chave PIX  │ │   Olheiros   │ │
+│  └──────────────────┘ └──────────────────┘ └──────────────┘ └──────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Modelo de Dados e Mapeamento de Interações
+
+- **Visão Geral do Painel**:
+  - Exibe indicadores executivos da vitrine (Projetos Ativos, Atletas na Vitrine, Manifestações de Interesse em Projetos/Eventos, Solicitações de Olheiros, Documentos de Transparência e Doações PIX), com atalhos diretos para cada seção conforme o perfil logado.
+- **Gestão de Atletas da Vitrine (antigo Participantes)**:
+  - Permite a `Super Admin`, `Admin` e `Editor` adicionar, editar, importar via planilha CSV e remover fichas públicas de atletas nos projetos (nome, apelido, foto, categoria, posição, número da camisa, idade, overall/atributos e destaque para olheiros), atualizando diretamente a lista pública do projeto.
+- **Manifestações de Interesse (Inscrições em Projetos e Eventos)**:
+  - Registra o interesse enviado pelo formulário público e permite à coordenação (`Super Admin` e `Admin`) acompanhar o status ou converter diretamente um atleta aprovado para a vitrine do projeto.
+- **Segurança & Regras de Acesso**:
+  - Remoção das rotas e regras de `attendance_sessions` e `participant_private` no cliente, servidor Express/Cloud SQL e `firestore.rules`.
+  - Bloqueio do formulário de auto-cadastro de visitantes na tela de login administrativo, mantendo apenas autenticação da equipe autorizada e parceiros convidados.

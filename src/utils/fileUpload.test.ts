@@ -29,7 +29,7 @@ test('parseTransparencyFinancialCsv parses allocation and revenue rows from samp
 test('parseEnrollmentsCsv parses student enrollment rows from sample CSV', () => {
   const parsed = parseEnrollmentsCsv(ENROLLMENT_SAMPLE_CSV);
   assert.equal(parsed.error, undefined);
-  assert.equal(parsed.rows.length, 3);
-  assert.equal(parsed.rows[0].studentName, 'Gabriel Souza Lima');
-  assert.equal(parsed.rows[0].studentAge, 11);
+  assert.equal(parsed.rows.length, 2);
+  assert.equal(parsed.rows[0].studentName, 'Participante Exemplo 1');
+  assert.equal(parsed.rows[0].studentAge, 12);
 });

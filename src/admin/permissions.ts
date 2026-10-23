@@ -3,7 +3,6 @@ import type {
   AdminSectionId,
   AdminUserProfile,
   DataClassificationLevel,
-  ParticipantPrivateRecord,
 } from './types.ts';
 import type { ProjectParticipant, VitalizarProject } from '../types/index.ts';
 import type { EventRsvpRecord } from '../context/ClubDataContext.tsx';
@@ -11,30 +10,37 @@ import type { EventRsvpRecord } from '../context/ClubDataContext.tsx';
 export const ROLE_LABELS: Record<AdminRole, string> = {
   super_admin: 'Super Admin (Dono)',
   admin: 'Admin (Coordenação)',
-  editor: 'Editor (Comunicação)',
-  professor: 'Professor (Turmas)',
-  financeiro: 'Financeiro (Conferência)',
-  parceiro: 'Parceiro Institucional',
-  apoiador: 'Apoiador Vitalizar',
-  visitante: 'Visitante',
+  editor: 'Editor (Vitrine & Comunicação)',
+  financeiro: 'Financeiro (Transparência & PIX)',
+  parceiro: 'Parceiro & Olheiro',
 };
 
 export const ROLE_DESCRIPTIONS: Record<AdminRole, string> = {
-  super_admin: 'Acesso total ao sistema, dados sensíveis, usuários e perfis.',
-  admin: 'Todo o conteúdo, inscrições e dados pessoais. Não cria nem altera super_admin.',
-  editor: 'Notícias, eventos, galeria, patrocinadores, banners e páginas. Sem dados pessoais.',
-  professor: 'Apenas projetos vinculados (projectIds): participantes, chamada e inscrições da turma.',
-  financeiro: 'Transparência, configuração do PIX e registros de doação (leitura e conferência).',
-  parceiro: 'Acompanhamento de impacto social, marca parceira, transparência e captação técnica.',
-  apoiador: 'Perfil concedido aos visitantes que realizaram doação, com selo oficial e inscrições.',
-  visitante: 'Acompanhamento de inscrições nos projetos, eventos e envio de apoio comunitário.',
+  super_admin: 'Acesso total à vitrine institucional, relacionamentos, equipe e auditoria.',
+  admin: 'Gestão completa da vitrine, atletas, projetos, interessados e comunidade. Não altera super_admin.',
+  editor: 'Gestão da vitrine de atletas, projetos, notícias, agenda, galeria, parceiros, polos e avisos.',
+  financeiro: 'Portal da transparência, relatórios fiscais, chave PIX e conferência de apoios.',
+  parceiro: 'Acompanhamento de marcas parceiras, relatórios de transparência e captação técnica (olheiros).',
 };
+
+export function normalizeAdminRole(raw?: string | null): AdminRole {
+  if (
+    raw === 'super_admin' ||
+    raw === 'admin' ||
+    raw === 'editor' ||
+    raw === 'financeiro' ||
+    raw === 'parceiro'
+  ) {
+    return raw;
+  }
+  if (raw === 'professor') return 'editor';
+  return 'parceiro';
+}
 
 export const ROLE_SECTIONS: Record<AdminRole, AdminSectionId[]> = {
   super_admin: [
     'visao-geral',
     'inscricoes',
-    'chamada',
     'participantes',
     'projetos',
     'noticias',
@@ -51,7 +57,6 @@ export const ROLE_SECTIONS: Record<AdminRole, AdminSectionId[]> = {
   admin: [
     'visao-geral',
     'inscricoes',
-    'chamada',
     'participantes',
     'projetos',
     'noticias',
@@ -67,6 +72,7 @@ export const ROLE_SECTIONS: Record<AdminRole, AdminSectionId[]> = {
   ],
   editor: [
     'visao-geral',
+    'participantes',
     'projetos',
     'noticias',
     'eventos',
@@ -75,15 +81,12 @@ export const ROLE_SECTIONS: Record<AdminRole, AdminSectionId[]> = {
     'polos',
     'configuracoes',
   ],
-  professor: ['visao-geral', 'chamada', 'participantes', 'inscricoes', 'projetos'],
   financeiro: ['visao-geral', 'transparencia', 'comunidade', 'configuracoes'],
   parceiro: ['visao-geral', 'patrocinadores', 'transparencia', 'comunidade'],
-  apoiador: ['visao-geral', 'inscricoes', 'transparencia', 'comunidade'],
-  visitante: ['visao-geral', 'inscricoes', 'comunidade'],
 };
 
 export const DATA_CLASSIFICATION: Record<string, DataClassificationLevel> = {
-  // Público
+  // Público (Vitrine)
   news_articles: 'público',
   events: 'público',
   gallery_albums: 'público',
@@ -91,13 +94,12 @@ export const DATA_CLASSIFICATION: Record<string, DataClassificationLevel> = {
   facility_polos: 'público',
   transparency_docs: 'público',
   club_info: 'público',
+  projects: 'público',
   // Interno
   admins: 'interno',
   admin_invites: 'interno',
   audit_logs: 'interno',
-  // Sensível (LGPD - menores, contatos, doações, chamada, saúde)
-  participant_private: 'sensível',
-  attendance_sessions: 'sensível',
+  // Relacionamento & Captação
   rsvps: 'sensível',
   contact_messages: 'sensível',
   scout_inquiries: 'sensível',
@@ -110,7 +112,6 @@ export function isStaffRole(role: AdminRole): boolean {
     role === 'super_admin' ||
     role === 'admin' ||
     role === 'editor' ||
-    role === 'professor' ||
     role === 'financeiro'
   );
 }
@@ -120,11 +121,11 @@ export function canAccessSection(role: AdminRole, section: AdminSectionId): bool
 }
 
 export function canExportSensitiveCsv(role: AdminRole): boolean {
-  return role === 'super_admin' || role === 'admin';
+  return role === 'super_admin' || role === 'admin' || role === 'editor';
 }
 
 export function canImportCsv(role: AdminRole): boolean {
-  return role === 'super_admin' || role === 'admin';
+  return role === 'super_admin' || role === 'admin' || role === 'editor';
 }
 
 export function canDeleteRecords(role: AdminRole): boolean {
@@ -135,15 +136,13 @@ export function canViewAuditLogs(role: AdminRole): boolean {
   return role === 'super_admin' || role === 'admin';
 }
 
-export function canManageProject(profile: AdminUserProfile | null, projectId: string): boolean {
+export function canManageProject(profile: AdminUserProfile | null): boolean {
   if (!profile || !profile.ativo) return false;
-  if (profile.role === 'super_admin' || profile.role === 'admin' || profile.role === 'editor') {
-    return true;
-  }
-  if (profile.role === 'professor') {
-    return (profile.projectIds || []).includes(projectId);
-  }
-  return false;
+  return (
+    profile.role === 'super_admin' ||
+    profile.role === 'admin' ||
+    profile.role === 'editor'
+  );
 }
 
 export function getReadablePrivateCollections(role: AdminRole): string[] {
@@ -156,19 +155,12 @@ export function getReadablePrivateCollections(role: AdminRole): string[] {
         'scout_inquiries',
         'donation_pledges',
         'volunteer_applications',
-        'attendance_sessions',
-        'participant_private',
         'audit_logs',
       ];
-    case 'professor':
-      return ['rsvps', 'attendance_sessions', 'participant_private'];
     case 'financeiro':
       return ['donation_pledges'];
     case 'parceiro':
       return ['scout_inquiries'];
-    case 'apoiador':
-    case 'visitante':
-      return ['rsvps', 'donation_pledges'];
     case 'editor':
     default:
       return [];
@@ -191,25 +183,14 @@ export function canRoleWriteCollection(role: AdminRole, collectionName: string):
         'gallery_albums',
         'facility_polos',
       ].includes(collectionName);
-    case 'professor':
-      return [
-        'projects',
-        'participant_private',
-        'attendance_sessions',
-        'rsvps',
-      ].includes(collectionName);
     case 'financeiro':
       return [
         'transparency_docs',
         'site_settings',
         'donation_pledges',
-        'admins',
       ].includes(collectionName);
     case 'parceiro':
       return ['sponsors', 'scout_inquiries'].includes(collectionName);
-    case 'apoiador':
-    case 'visitante':
-      return ['rsvps', 'donation_pledges', 'admins'].includes(collectionName);
     default:
       return false;
   }
@@ -247,40 +228,13 @@ export function maskEmail(email?: string): string {
 }
 
 /**
- * Strips sensitive LGPD fields (health/BMI/weight/height, birthDate, schoolInfo, nextfitCode)
- * from the public project participant and returns both the sanitized public participant
- * and the private record for `/participant_private/{id}`.
+ * Ensures athlete records in the showcase only carry public sports showcase attributes
+ * without private parent/health/nextfit data.
  */
-export function splitParticipantPublicAndPrivate(
-  participant: ProjectParticipant,
-  projectId: string
-): {
-  publicParticipant: ProjectParticipant;
-  privateRecord: ParticipantPrivateRecord;
-} {
-  const privateRecord: ParticipantPrivateRecord = {
-    id: participant.id,
-    projectId,
-    participantName: participant.name,
-    birthDate: participant.birthDate || '',
-    weight: participant.weight || '',
-    height: participant.height || '',
-    bmi: participant.bmi || '',
-    nextfitCode: participant.nextfitCode || '',
-    planName: participant.planName || '',
-    schoolInfo: participant.schoolInfo
-      ? { ...participant.schoolInfo }
-      : {
-          schoolName: '',
-          grade: '',
-          turn: 'Matutino',
-          attendanceRate: '100%',
-        },
-    updatedAt: new Date().toISOString(),
-  };
-
-  // Public document keeps only public showcase fields (no birthDate, weight, height, bmi, school name, or nextfitCode)
-  const publicParticipant: ProjectParticipant = {
+export function sanitizeShowcaseParticipant(
+  participant: ProjectParticipant
+): ProjectParticipant {
+  return {
     ...participant,
     nextfitCode: '',
     planName: '',
@@ -292,29 +246,8 @@ export function splitParticipantPublicAndPrivate(
       schoolName: '',
       grade: '',
       turn: 'Matutino',
-      attendanceRate: participant.schoolInfo?.attendanceRate || 'Regular',
+      attendanceRate: 'Regular',
     },
-  };
-
-  return { publicParticipant, privateRecord };
-}
-
-export function mergeParticipantWithPrivate(
-  participant: ProjectParticipant,
-  priv?: ParticipantPrivateRecord
-): ProjectParticipant {
-  if (!priv) return participant;
-  return {
-    ...participant,
-    birthDate: priv.birthDate || participant.birthDate || '',
-    weight: priv.weight || participant.weight || '',
-    height: priv.height || participant.height || '',
-    bmi: priv.bmi || participant.bmi || '',
-    nextfitCode: priv.nextfitCode || participant.nextfitCode || '',
-    planName: priv.planName || participant.planName || '',
-    schoolInfo: priv.schoolInfo?.schoolName
-      ? priv.schoolInfo
-      : participant.schoolInfo,
   };
 }
 
@@ -337,8 +270,7 @@ export function resolveProjectIdFromRsvp(
 
 export function filterPrivateCollectionsForUser(
   rawCollections: Record<string, any[]>,
-  profile: AdminUserProfile | null | undefined,
-  projects: Pick<VitalizarProject, 'id' | 'name'>[] = []
+  profile: AdminUserProfile | null | undefined
 ): Record<string, any[]> {
   const empty: Record<string, any[]> = {
     rsvps: [],
@@ -346,8 +278,6 @@ export function filterPrivateCollectionsForUser(
     scout_inquiries: [],
     donation_pledges: [],
     volunteer_applications: [],
-    attendance_sessions: [],
-    participant_private: [],
     audit_logs: [],
   };
   if (!profile || !profile.ativo) return empty;
@@ -360,26 +290,7 @@ export function filterPrivateCollectionsForUser(
       scout_inquiries: rawCollections.scout_inquiries || [],
       donation_pledges: rawCollections.donation_pledges || [],
       volunteer_applications: rawCollections.volunteer_applications || [],
-      attendance_sessions: rawCollections.attendance_sessions || [],
-      participant_private: rawCollections.participant_private || [],
       audit_logs: rawCollections.audit_logs || [],
-    };
-  }
-
-  if (role === 'professor') {
-    const allowedIds = new Set(profile.projectIds || []);
-    return {
-      ...empty,
-      rsvps: (rawCollections.rsvps || []).filter((r) => {
-        const pid = resolveProjectIdFromRsvp(r, projects);
-        return Boolean(pid && allowedIds.has(pid));
-      }),
-      attendance_sessions: (rawCollections.attendance_sessions || []).filter((s) =>
-        Boolean(s?.projectId && allowedIds.has(s.projectId))
-      ),
-      participant_private: (rawCollections.participant_private || []).filter((p) =>
-        Boolean(p?.projectId && allowedIds.has(p.projectId))
-      ),
     };
   }
 
@@ -397,23 +308,5 @@ export function filterPrivateCollectionsForUser(
     };
   }
 
-  if (role === 'apoiador' || role === 'visitante') {
-    const emailLower = (profile.email || '').trim().toLowerCase();
-    return {
-      ...empty,
-      rsvps: (rawCollections.rsvps || []).filter(
-        (r) =>
-          (r?.userId && r.userId === profile.uid) ||
-          (r?.email && String(r.email).trim().toLowerCase() === emailLower)
-      ),
-      donation_pledges: (rawCollections.donation_pledges || []).filter(
-        (d) =>
-          (d?.userId && d.userId === profile.uid) ||
-          (d?.donorEmail && String(d.donorEmail).trim().toLowerCase() === emailLower)
-      ),
-    };
-  }
-
   return empty;
 }
-

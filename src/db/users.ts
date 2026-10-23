@@ -2,6 +2,7 @@ import { db } from './index.ts';
 import { users, collectionItems, uploadedFiles } from './schema.ts';
 import { eq, inArray } from 'drizzle-orm';
 import type { AdminRole, AdminUserProfile, AdminInviteRecord } from '../admin/types.ts';
+import { normalizeAdminRole } from '../admin/permissions.ts';
 
 export const PRIMARY_ADMIN_EMAIL = 'higor.rock2011@gmail.com';
 
@@ -58,16 +59,17 @@ export async function resolveUserProfile(
   const existingAdminItem = await getCollectionItemById('admins', uid);
   if (existingAdminItem && existingAdminItem.payload && typeof existingAdminItem.payload === 'object') {
     const raw = existingAdminItem.payload as Record<string, any>;
+    const isLegacyVisitor = raw.role === 'visitante' || raw.role === 'apoiador';
     const role: AdminRole = isPrimaryOwner
       ? 'super_admin'
-      : ((raw.role as AdminRole) || 'visitante');
+      : normalizeAdminRole(raw.role);
     const profile: AdminUserProfile = {
       uid,
       email: String(raw.email || email),
       nome: String(raw.nome || displayName || email.split('@')[0] || 'Usuário'),
       role,
       projectIds: Array.isArray(raw.projectIds) ? raw.projectIds.map(String) : [],
-      ativo: isPrimaryOwner ? true : raw.ativo !== false,
+      ativo: isPrimaryOwner ? true : isLegacyVisitor ? false : raw.ativo !== false,
       criadoEm: String(raw.criadoEm || new Date().toISOString()),
       criadoPor: String(raw.criadoPor || 'sistema'),
     };
@@ -108,7 +110,7 @@ export async function resolveUserProfile(
         uid,
         email,
         nome: inv.nome || displayName || email.split('@')[0],
-        role: inv.role || 'visitante',
+        role: normalizeAdminRole(inv.role),
         projectIds: Array.isArray(inv.projectIds) ? inv.projectIds : [],
         ativo: true,
         criadoEm: new Date().toISOString(),
@@ -126,36 +128,18 @@ export async function resolveUserProfile(
     }
   }
 
-  // 4. Default visitor profile (or existing role in users table)
-  const existingUsers = await db
-    .select()
-    .from(users)
-    .where(eq(users.uid, uid))
-    .catch(() => []);
-  const existingRow = existingUsers[0];
-  const fallbackRole: AdminRole =
-    existingRow?.role && existingRow.role !== 'super_admin'
-      ? (existingRow.role as AdminRole)
-      : 'visitante';
-
-  const visitorProfile: AdminUserProfile = {
+  // 4. Uninvited accounts are inactive in the admin panel until invited by an administrator
+  const inactiveProfile: AdminUserProfile = {
     uid,
     email,
-    nome: displayName || existingRow?.name || email.split('@')[0] || 'Visitante',
-    role: fallbackRole,
+    nome: displayName || email.split('@')[0] || 'Usuário',
+    role: 'parceiro',
     projectIds: [],
-    ativo: true,
+    ativo: false,
     criadoEm: new Date().toISOString(),
-    criadoPor: 'auto_cadastro',
+    criadoPor: 'nao_autorizado',
   };
-  const dbUser = await getOrCreateUser(
-    uid,
-    email,
-    visitorProfile.nome,
-    visitorProfile.role
-  ).catch(() => undefined);
-  await upsertCollectionRecord('admins', uid, visitorProfile, dbUser?.id).catch(() => {});
-  return { profile: visitorProfile, dbUserId: dbUser?.id };
+  return { profile: inactiveProfile };
 }
 
 export async function getUsers() {
@@ -303,4 +287,20 @@ export async function getUploadedFile(id: string) {
     throw new Error('Database query failed. Please try again later.', { cause: error });
   }
 }
+
+export async function purgeObsoleteCollections() {
+  try {
+    await db
+      .delete(collectionItems)
+      .where(
+        inArray(collectionItems.collectionName, [
+          'attendance_sessions',
+          'participant_private',
+        ])
+      );
+  } catch (error) {
+    console.error('Failed to purge obsolete collections:', error);
+  }
+}
+
 

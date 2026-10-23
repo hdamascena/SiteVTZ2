@@ -1,5 +1,4 @@
 import type { AttachedFile } from '../types/index.ts';
-import { auth } from '../firebase.ts';
 
 async function uploadToSqlIfAuthenticated(params: {
   id: string;
@@ -9,6 +8,8 @@ async function uploadToSqlIfAuthenticated(params: {
   dataUrl: string;
 }): Promise<string> {
   try {
+    if (typeof window === 'undefined') return params.dataUrl;
+    const { auth } = await import('../firebase.ts');
     const user = auth.currentUser;
     if (!user) return params.dataUrl;
     const token = await user.getIdToken();

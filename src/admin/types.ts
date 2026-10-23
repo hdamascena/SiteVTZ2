@@ -2,11 +2,8 @@ export type AdminRole =
   | 'super_admin'
   | 'admin'
   | 'editor'
-  | 'professor'
   | 'financeiro'
-  | 'parceiro'
-  | 'apoiador'
-  | 'visitante';
+  | 'parceiro';
 
 export type DataClassificationLevel = 'público' | 'interno' | 'sensível';
 
@@ -30,29 +27,6 @@ export interface AdminInviteRecord {
   criadoPor: string;
 }
 
-export interface ParticipantPrivateRecord {
-  id: string;
-  projectId: string;
-  participantName: string;
-  birthDate?: string;
-  weight?: string;
-  height?: string;
-  bmi?: string;
-  nextfitCode?: string;
-  planName?: string;
-  schoolInfo?: {
-    schoolName: string;
-    grade: string;
-    turn: 'Matutino' | 'Vespertino' | 'Integral';
-    attendanceRate: string;
-  };
-  responsibleName?: string;
-  phone?: string;
-  email?: string;
-  healthNotes?: string;
-  updatedAt?: string;
-}
-
 export type ProjectEnrollmentStatus =
   | 'pendente'
   | 'em_analise'
@@ -63,7 +37,6 @@ export type ProjectEnrollmentStatus =
 export type AdminSectionId =
   | 'visao-geral'
   | 'inscricoes'
-  | 'chamada'
   | 'participantes'
   | 'projetos'
   | 'noticias'

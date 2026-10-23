@@ -7,18 +7,16 @@ import {
   Trash2,
   FileSpreadsheet,
 } from 'lucide-react';
-import type { AdminUserProfile, ParticipantPrivateRecord } from '../types.ts';
+import type { AdminUserProfile } from '../types.ts';
 import {
   canDeleteRecords,
   canExportSensitiveCsv,
   canImportCsv,
-  mergeParticipantWithPrivate,
+  sanitizeShowcaseParticipant,
 } from '../permissions.ts';
 import {
-  CampoSensivelMascara,
   CampoTexto,
   CampoUploadImagem,
-  SeloSensivel,
 } from '../components/CampoTexto.tsx';
 import { Tabela, type ColunaTabela } from '../components/Tabela.tsx';
 import {
@@ -44,11 +42,10 @@ interface ParticipantesViewProps {
   ) => void;
 }
 
-interface EnrichedParticipantRow {
+interface ShowcaseParticipantRow {
   projectId: string;
   projectName: string;
   participant: ProjectParticipant;
-  privateData?: ParticipantPrivateRecord;
 }
 
 export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
@@ -57,31 +54,22 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
 }) => {
   const {
     projects,
-    participantPrivateMap,
-    saveParticipantPrivate,
     saveAdminChanges,
     recordAuditEvent,
     showToast,
   } = useClubData();
 
-  const allowedProjects = useMemo(() => {
-    if (profile.role === 'professor') {
-      return projects.filter((p) => (profile.projectIds || []).includes(p.id));
-    }
-    return projects;
-  }, [projects, profile.role, profile.projectIds]);
-
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Drawer editing state
-  const [editingRow, setEditingRow] = useState<EnrichedParticipantRow | null>(
+  const [editingRow, setEditingRow] = useState<ShowcaseParticipantRow | null>(
     null
   );
   const [isNew, setIsNew] = useState(false);
   const [saveState, setSaveState] = useState<SaveIndicatorState>('idle');
 
-  // Form fields
+  // Public Showcase Form fields
   const [formProjectId, setFormProjectId] = useState('');
   const [formName, setFormName] = useState('');
   const [formNickname, setFormNickname] = useState('');
@@ -89,38 +77,24 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
   const [formPosition, setFormPosition] = useState('Meia');
   const [formJersey, setFormJersey] = useState('10');
   const [formAge, setFormAge] = useState('14');
-  const [formStatus, setFormStatus] = useState<
-    'ativo' | 'trancado' | 'inativo' | 'pendente'
-  >('ativo');
+  const [formCardTier, setFormCardTier] = useState<ProjectParticipant['cardTier']>('prata');
+  const [formOverall, setFormOverall] = useState('78');
+  const [formScoutSummary, setFormScoutSummary] = useState('');
   const [formPhotoUrl, setFormPhotoUrl] = useState('');
-  // Sensitive fields (stored in /participant_private)
-  const [formBirthDate, setFormBirthDate] = useState('');
-  const [formHeight, setFormHeight] = useState('');
-  const [formWeight, setFormWeight] = useState('');
-  const [formBmi, setFormBmi] = useState('');
-  const [formSchoolName, setFormSchoolName] = useState('');
-  const [formSchoolGrade, setFormSchoolGrade] = useState('8º Ano');
-  const [formNextfitCode, setFormNextfitCode] = useState('');
-  const [formResponsible, setFormResponsible] = useState('');
-  const [formPhone, setFormPhone] = useState('');
-  const [formEmail, setFormEmail] = useState('');
 
   // Delete confirmation modal
   const [deleteTarget, setDeleteTarget] =
-    useState<EnrichedParticipantRow | null>(null);
+    useState<ShowcaseParticipantRow | null>(null);
 
   const allRows = useMemo(() => {
-    const list: EnrichedParticipantRow[] = [];
-    allowedProjects.forEach((proj) => {
+    const list: ShowcaseParticipantRow[] = [];
+    projects.forEach((proj) => {
       if (projectFilter !== 'all' && proj.id !== projectFilter) return;
       (proj.participants || []).forEach((pt) => {
-        const priv = participantPrivateMap[pt.id];
-        const merged = mergeParticipantWithPrivate(pt, priv);
         list.push({
           projectId: proj.id,
           projectName: proj.name,
-          participant: merged,
-          privateData: priv,
+          participant: sanitizeShowcaseParticipant(pt),
         });
       });
     });
@@ -129,17 +103,16 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     return list.filter(
       (r) =>
         r.participant.name.toLowerCase().includes(q) ||
+        (r.participant.nickname || '').toLowerCase().includes(q) ||
         (r.participant.category || '').toLowerCase().includes(q) ||
-        (r.participant.nextfitCode || '').toLowerCase().includes(q) ||
-        (r.participant.schoolInfo?.schoolName || '').toLowerCase().includes(q)
+        (r.participant.position || '').toLowerCase().includes(q)
     );
-  }, [allowedProjects, projectFilter, participantPrivateMap, searchQuery]);
+  }, [projects, projectFilter, searchQuery]);
 
-  const openEditDrawer = (row: EnrichedParticipantRow) => {
+  const openEditDrawer = (row: ShowcaseParticipantRow) => {
     setIsNew(false);
     setEditingRow(row);
     const p = row.participant;
-    const priv = row.privateData;
     setFormProjectId(row.projectId);
     setFormName(p.name);
     setFormNickname(p.nickname || '');
@@ -147,22 +120,10 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     setFormPosition(p.position || 'Meia');
     setFormJersey(String(p.jerseyNumber || 10));
     setFormAge(String(p.age || 14));
-    setFormStatus(p.enrollmentStatus || 'ativo');
+    setFormCardTier(p.cardTier || 'prata');
+    setFormOverall(String(p.stats?.overall || 78));
+    setFormScoutSummary(p.scoutReport?.summary || '');
     setFormPhotoUrl(p.photoUrl || '');
-    setFormBirthDate(priv?.birthDate || p.birthDate || '');
-    setFormHeight(priv?.height || p.height || '');
-    setFormWeight(priv?.weight || p.weight || '');
-    setFormBmi(priv?.bmi || p.bmi || '');
-    setFormSchoolName(
-      priv?.schoolInfo?.schoolName || p.schoolInfo?.schoolName || ''
-    );
-    setFormSchoolGrade(
-      priv?.schoolInfo?.grade || p.schoolInfo?.grade || '8º Ano'
-    );
-    setFormNextfitCode(priv?.nextfitCode || p.nextfitCode || '');
-    setFormResponsible(priv?.responsibleName || '');
-    setFormPhone(priv?.phone || '');
-    setFormEmail(priv?.email || '');
     setSaveState('idle');
   };
 
@@ -170,12 +131,11 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     const defaultProjId =
       projectFilter !== 'all'
         ? projectFilter
-        : allowedProjects[0]?.id || '';
+        : projects[0]?.id || '';
     setIsNew(true);
     setEditingRow({
       projectId: defaultProjId,
-      projectName:
-        allowedProjects.find((p) => p.id === defaultProjId)?.name || '',
+      projectName: projects.find((p) => p.id === defaultProjId)?.name || '',
       participant: {} as ProjectParticipant,
     });
     setFormProjectId(defaultProjId);
@@ -184,21 +144,13 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     setFormCategory('Sub-15');
     setFormPosition('Meia');
     setFormJersey('10');
-    setFormAge('13');
-    setFormStatus('ativo');
+    setFormAge('14');
+    setFormCardTier('prata');
+    setFormOverall('78');
+    setFormScoutSummary('Atleta integrante da vitrine esportiva Vitalizar.');
     setFormPhotoUrl(
       'https://images.unsplash.com/photo-1517466787929-bc90951d0974?w=400&q=80'
     );
-    setFormBirthDate('');
-    setFormHeight('');
-    setFormWeight('');
-    setFormBmi('');
-    setFormSchoolName('');
-    setFormSchoolGrade('8º Ano');
-    setFormNextfitCode('');
-    setFormResponsible('');
-    setFormPhone('');
-    setFormEmail('');
     setSaveState('idle');
   };
 
@@ -208,84 +160,88 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     setSaveState('saving');
 
     const partId = isNew ? `part-${Date.now()}` : editingRow.participant.id;
-    const basePart: ProjectParticipant = isNew
-      ? {
-          id: partId,
-          name: formName.trim(),
-          nickname: formNickname.trim() || formName.trim().split(' ')[0],
-          enrollmentStatus: formStatus,
-          photoUrl:
-            formPhotoUrl.trim() ||
-            'https://images.unsplash.com/photo-1517466787929-bc90951d0974?w=400&q=80',
-          jerseyNumber: Number(formJersey) || 10,
-          position: formPosition.trim() || 'Atleta',
-          positionGroup: 'meio',
-          preferredFoot: 'Destro',
-          age: Number(formAge) || 13,
-          birthDate: '',
-          category: formCategory.trim() || 'Sub-15',
-          height: '',
-          weight: '',
-          cardTier: 'prata',
-          stats: {
-            pace: 76,
-            shooting: 74,
-            passing: 75,
-            dribbling: 76,
-            defending: 70,
-            physical: 74,
-            overall: 75,
-          },
-          schoolInfo: {
-            schoolName: '',
-            grade: '',
-            turn: 'Matutino',
-            attendanceRate: '98%',
-          },
-          highlights: ['Integrante oficial das turmas Vitalizar'],
-          scoutReport: {
-            summary: 'Atleta em desenvolvimento técnico e pedagógico.',
-            strengths: ['Comprometimento'],
-            developmentAreas: ['Aprimoramento contínuo'],
-            scoutRating: 'Formação Regular',
-          },
-          photos: [],
-          videos: [],
-        }
-      : {
-          ...editingRow.participant,
-          name: formName.trim(),
-          nickname: formNickname.trim() || formName.trim().split(' ')[0],
-          enrollmentStatus: formStatus,
-          photoUrl: formPhotoUrl.trim() || editingRow.participant.photoUrl,
-          jerseyNumber: Number(formJersey) || 10,
-          position: formPosition.trim(),
-          age: Number(formAge) || editingRow.participant.age,
-          category: formCategory.trim(),
-        };
-
-    const privRecord: ParticipantPrivateRecord = {
-      id: partId,
-      projectId: formProjectId,
-      participantName: formName.trim(),
-      birthDate: formBirthDate.trim(),
-      height: formHeight.trim(),
-      weight: formWeight.trim(),
-      bmi: formBmi.trim(),
-      nextfitCode: formNextfitCode.trim(),
-      schoolInfo: {
-        schoolName: formSchoolName.trim(),
-        grade: formSchoolGrade.trim() || 'Regular',
-        turn: 'Matutino',
-        attendanceRate: '98%',
-      },
-      responsibleName: formResponsible.trim(),
-      phone: formPhone.trim(),
-      email: formEmail.trim(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    await saveParticipantPrivate(privRecord).catch(() => {});
+    const ovr = Math.min(99, Math.max(50, Number(formOverall) || 78));
+    const basePart: ProjectParticipant = sanitizeShowcaseParticipant(
+      isNew
+        ? {
+            id: partId,
+            name: formName.trim(),
+            nickname: formNickname.trim() || formName.trim().split(' ')[0],
+            enrollmentStatus: 'ativo',
+            photoUrl:
+              formPhotoUrl.trim() ||
+              'https://images.unsplash.com/photo-1517466787929-bc90951d0974?w=400&q=80',
+            jerseyNumber: Number(formJersey) || 10,
+            position: formPosition.trim() || 'Atleta',
+            positionGroup: 'meio',
+            preferredFoot: 'Destro',
+            age: Number(formAge) || 14,
+            birthDate: '',
+            category: formCategory.trim() || 'Sub-15',
+            height: '',
+            weight: '',
+            cardTier: formCardTier,
+            stats: {
+              pace: ovr,
+              shooting: ovr - 2,
+              passing: ovr - 1,
+              dribbling: ovr,
+              defending: ovr - 4,
+              physical: ovr - 2,
+              overall: ovr,
+            },
+            schoolInfo: {
+              schoolName: '',
+              grade: '',
+              turn: 'Matutino',
+              attendanceRate: '98%',
+            },
+            highlights: ['Atleta em destaque na Vitrine Vitalizar'],
+            scoutReport: {
+              summary:
+                formScoutSummary.trim() ||
+                'Atleta em desenvolvimento técnico e esportivo.',
+              strengths: ['Comprometimento', 'Técnica'],
+              developmentAreas: ['Evolução contínua'],
+              scoutRating: 'Vitrine Oficial',
+            },
+            photos: [],
+            videos: [],
+          }
+        : {
+            ...editingRow.participant,
+            name: formName.trim(),
+            nickname: formNickname.trim() || formName.trim().split(' ')[0],
+            photoUrl: formPhotoUrl.trim() || editingRow.participant.photoUrl,
+            jerseyNumber: Number(formJersey) || 10,
+            position: formPosition.trim(),
+            age: Number(formAge) || editingRow.participant.age,
+            category: formCategory.trim(),
+            cardTier: formCardTier,
+            stats: {
+              ...(editingRow.participant.stats || {
+                pace: ovr,
+                shooting: ovr - 2,
+                passing: ovr - 1,
+                dribbling: ovr,
+                defending: ovr - 4,
+                physical: ovr - 2,
+              }),
+              overall: ovr,
+            },
+            scoutReport: {
+              ...(editingRow.participant.scoutReport || {
+                strengths: ['Comprometimento'],
+                developmentAreas: ['Evolução contínua'],
+                scoutRating: 'Vitrine Oficial',
+              }),
+              summary:
+                formScoutSummary.trim() ||
+                editingRow.participant.scoutReport?.summary ||
+                'Atleta em desenvolvimento técnico.',
+            },
+          }
+    );
 
     const updatedProjects = projects.map((proj) => {
       const filteredOut = (proj.participants || []).filter(
@@ -311,13 +267,13 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
 
     saveAdminChanges({
       projects: updatedProjects,
-      toastMessage: `Dados de "${formName.trim()}" salvos com proteção LGPD!`,
-      logDetails: `Participante ${formName.trim()} salvo no projeto ${formProjectId}.`,
+      toastMessage: `Atleta "${formName.trim()}" salvo na vitrine!`,
+      logDetails: `Atleta ${formName.trim()} salvo no projeto ${formProjectId}.`,
     });
 
     recordAuditEvent({
-      action: isNew ? 'CRIAR_PARTICIPANTE' : 'EDITAR_PARTICIPANTE',
-      collection: 'participant_private',
+      action: isNew ? 'CRIAR_ATLETA_VITRINE' : 'EDITAR_ATLETA_VITRINE',
+      collection: 'projects',
       itemId: partId,
       role: profile.role,
       beforeSummary: isNew ? 'novo' : editingRow.participant.name,
@@ -352,15 +308,15 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     });
 
     onScheduleUndoDelete(
-      `Participante "${target.participant.name}"`,
+      `Atleta "${target.participant.name}"`,
       () => {
         saveAdminChanges({
           projects: updatedProjects,
-          toastMessage: `Participante "${target.participant.name}" removido.`,
-          logDetails: `Exclusão de participante ${target.participant.name}.`,
+          toastMessage: `Atleta "${target.participant.name}" removido da vitrine.`,
+          logDetails: `Exclusão de atleta ${target.participant.name}.`,
         });
         recordAuditEvent({
-          action: 'EXCLUIR_PARTICIPANTE',
+          action: 'EXCLUIR_ATLETA_VITRINE',
           collection: 'projects',
           itemId: target.participant.id,
           role: profile.role,
@@ -377,45 +333,38 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     );
   };
 
-  const handleExportSensitiveCsv = () => {
+  const handleExportShowcaseCsv = () => {
     if (!canExportSensitiveCsv(profile.role)) {
-      showToast('Apenas Admin e Super Admin podem exportar CSV de dados sensíveis.', 'error');
+      showToast('Apenas Admin e Super Admin podem exportar CSV.', 'error');
       return;
     }
 
     const headers = [
       'ID',
-      'Codigo NextFit',
       'Nome',
+      'Apelido',
       'Projeto',
       'Categoria',
+      'Posicao',
+      'Camisa',
       'Idade',
-      'Data Nascimento (Sensivel)',
-      'Altura (Sensivel)',
-      'Peso (Sensivel)',
-      'IMC (Sensivel)',
-      'Escola (Sensivel)',
-      'Responsavel (Sensivel)',
-      'Telefone (Sensivel)',
+      'Overall',
+      'Resumo Tecnico',
     ];
 
     const rows = allRows.map((r) => {
       const p = r.participant;
-      const priv = r.privateData;
       return [
         p.id,
-        priv?.nextfitCode || p.nextfitCode || '',
         p.name,
+        p.nickname || '',
         r.projectName,
         p.category,
+        p.position,
+        String(p.jerseyNumber || ''),
         String(p.age || ''),
-        priv?.birthDate || p.birthDate || '',
-        priv?.height || p.height || '',
-        priv?.weight || p.weight || '',
-        priv?.bmi || p.bmi || '',
-        priv?.schoolInfo?.schoolName || p.schoolInfo?.schoolName || '',
-        priv?.responsibleName || '',
-        priv?.phone || '',
+        String(p.stats?.overall || ''),
+        p.scoutReport?.summary || '',
       ].map((v) => `"${String(v).replace(/"/g, '""')}"`);
     });
 
@@ -424,23 +373,23 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `participantes-sensivel-vitalizar-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `vitrine-atletas-vitalizar-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
 
     recordAuditEvent({
-      action: 'EXPORTAR_CSV_SENSIVEL',
-      collection: 'participant_private',
+      action: 'EXPORTAR_CSV_VITRINE',
+      collection: 'projects',
       itemId: projectFilter,
       role: profile.role,
-      afterSummary: `Exportou ${allRows.length} registros sensíveis em CSV`,
+      afterSummary: `Exportou ${allRows.length} atletas da vitrine em CSV`,
     });
-    showToast('CSV exportado e registrado no log de auditoria LGPD!');
+    showToast('CSV da vitrine exportado com sucesso!');
   };
 
   const handleImportCsvFile = (file: File) => {
     if (!canImportCsv(profile.role)) {
-      showToast('Apenas Admin e Super Admin podem importar planilhas CSV.', 'error');
+      showToast('Sem permissão para importar planilhas CSV.', 'error');
       return;
     }
     const reader = new FileReader();
@@ -448,7 +397,7 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
       const rawText = ev.target?.result as string;
       if (!rawText) return;
       const targetProj =
-        projectFilter !== 'all' ? projectFilter : allowedProjects[0]?.id;
+        projectFilter !== 'all' ? projectFilter : projects[0]?.id;
       const parsed = parseNextFitCsv(rawText, projects, targetProj);
       if (parsed.error) {
         showToast(parsed.error, 'error');
@@ -461,38 +410,19 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
           targetProj || 'auto'
         );
 
-      for (const row of parsed.rows) {
-        const pid = row.targetProjectId || targetProj || allowedProjects[0]?.id || '';
-        if (!pid) continue;
-        await saveParticipantPrivate({
-          id: row.id,
-          projectId: pid,
-          participantName: row.name,
-          birthDate: row.birthDate,
-          height: row.height,
-          weight: row.weight,
-          bmi: row.bmi,
-          nextfitCode: row.nextfitCode,
-          planName: row.planName,
-          schoolInfo: {
-            schoolName: row.schoolName,
-            grade: 'Regular',
-            turn: 'Matutino',
-            attendanceRate: '98%',
-          },
-          healthNotes: row.notes,
-          updatedAt: new Date().toISOString(),
-        }).catch(() => {});
-      }
+      const sanitizedProjects = updatedProjects.map((p) => ({
+        ...p,
+        participants: (p.participants || []).map(sanitizeShowcaseParticipant),
+      }));
 
       saveAdminChanges({
-        projects: updatedProjects,
-        toastMessage: `Planilha importada: ${addedCount} novos e ${updatedCount} atualizados!`,
-        logDetails: `Importação CSV NextFit (${file.name}): +${addedCount} / ~${updatedCount}.`,
+        projects: sanitizedProjects,
+        toastMessage: `Vitrine atualizada: ${addedCount} novos e ${updatedCount} atualizados!`,
+        logDetails: `Importação CSV Vitrine (${file.name}): +${addedCount} / ~${updatedCount}.`,
       });
       recordAuditEvent({
-        action: 'IMPORTAR_CSV_SENSIVEL',
-        collection: 'participant_private',
+        action: 'IMPORTAR_CSV_VITRINE',
+        collection: 'projects',
         itemId: file.name,
         role: profile.role,
         afterSummary: `${addedCount} adicionados, ${updatedCount} atualizados`,
@@ -501,10 +431,10 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     reader.readAsText(file, 'UTF-8');
   };
 
-  const columns: ColunaTabela<EnrichedParticipantRow>[] = [
+  const columns: ColunaTabela<ShowcaseParticipantRow>[] = [
     {
       id: 'nome',
-      header: 'Aluno / Participante',
+      header: 'Atleta da Vitrine',
       render: (r) => (
         <div className="flex items-center gap-2.5">
           <img
@@ -518,7 +448,7 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
               {r.participant.name}
             </span>
             <span className="text-[11px] text-slate-500 font-mono">
-              {r.participant.category} · #{r.participant.jerseyNumber}
+              {r.participant.category} · #{r.participant.jerseyNumber} · {r.participant.age} anos
             </span>
           </div>
         </div>
@@ -526,7 +456,7 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
     },
     {
       id: 'projeto',
-      header: 'Turma / Projeto',
+      header: 'Projeto Social',
       render: (r) => (
         <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
           {r.projectName}
@@ -534,57 +464,26 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
       ),
     },
     {
-      id: 'saude_escola',
-      header: 'Saúde & Escola (Sensível)',
-      render: (r) => {
-        const priv = r.privateData;
-        const school =
-          priv?.schoolInfo?.schoolName ||
-          r.participant.schoolInfo?.schoolName ||
-          'Não informada';
-        const bio = [
-          priv?.birthDate || r.participant.birthDate,
-          priv?.height || r.participant.height,
-          priv?.weight || r.participant.weight,
-          priv?.bmi ? `IMC ${priv.bmi}` : '',
-        ]
-          .filter(Boolean)
-          .join(' · ');
-        return (
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-slate-800 dark:text-slate-200 truncate max-w-[180px]">
-                {school}
-              </span>
-              <SeloSensivel level="sensível" />
-            </div>
-            <span className="text-[11px] font-mono text-slate-500 block">
-              {bio || 'Dados biométricos protegidos'}
-            </span>
-          </div>
-        );
-      },
-    },
-    {
-      id: 'contato',
-      header: 'Contato Responsável',
+      id: 'posicao_ovr',
+      header: 'Posição & Card',
       render: (r) => (
         <div className="space-y-0.5">
-          {r.privateData?.phone ? (
-            <CampoSensivelMascara
-              value={r.privateData.phone}
-              type="phone"
-              itemLabel={r.participant.name}
-              collection="participant_private"
-              itemId={r.participant.id}
-              onRevealAudit={(p) =>
-                recordAuditEvent({ ...p, role: profile.role })
-              }
-            />
-          ) : (
-            <span className="text-[11px] text-slate-400">Sem telefone</span>
-          )}
+          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 block">
+            {r.participant.position}
+          </span>
+          <span className="text-[11px] font-mono text-[#0284c7] dark:text-sky-400">
+            OVR {r.participant.stats?.overall || 75} · {(r.participant.cardTier || 'prata').toUpperCase()}
+          </span>
         </div>
+      ),
+    },
+    {
+      id: 'resumo',
+      header: 'Destaque Esportivo (Público)',
+      render: (r) => (
+        <span className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2 max-w-xs">
+          {r.participant.scoutReport?.summary || 'Atleta integrante do projeto.'}
+        </span>
       ),
     },
     {
@@ -606,7 +505,7 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
               type="button"
               onClick={() => setDeleteTarget(r)}
               className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer"
-              title="Excluir participante"
+              title="Excluir atleta da vitrine"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -624,7 +523,7 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
         keyExtractor={(r) => `${r.projectId}-${r.participant.id}`}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        searchPlaceholder="Buscar aluno por nome, categoria, escola ou código..."
+        searchPlaceholder="Buscar atleta por nome, apelido, categoria ou posição..."
         filterControls={
           <select
             value={projectFilter}
@@ -632,9 +531,9 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
             className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
           >
             <option value="all">
-              Todas as Turmas Permitidas ({allRows.length})
+              Todos os Projetos ({allRows.length} atletas)
             </option>
-            {allowedProjects.map((p) => (
+            {projects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
               </option>
@@ -649,7 +548,7 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
                   type="button"
                   onClick={() =>
                     downloadCsvTemplate(
-                      'modelo-participantes-vitalizar.csv',
+                      'modelo-atletas-vitrine-vitalizar.csv',
                       NEXTFIT_SAMPLE_CSV_CONTENT
                     )
                   }
@@ -679,9 +578,9 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
             {canExportSensitiveCsv(profile.role) && (
               <button
                 type="button"
-                onClick={handleExportSensitiveCsv}
+                onClick={handleExportShowcaseCsv}
                 className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-lg cursor-pointer inline-flex items-center gap-1.5"
-                title="Exportar CSV (registrado em audit_logs)"
+                title="Exportar CSV da Vitrine"
               >
                 <Download className="w-3.5 h-3.5 text-[#0284c7]" />
                 <span>Exportar CSV</span>
@@ -694,7 +593,7 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
               className="px-3.5 py-1.5 bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-bold rounded-lg cursor-pointer inline-flex items-center gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Novo Aluno</span>
+              <span>Novo Atleta</span>
             </button>
           </>
         }
@@ -703,22 +602,22 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
       <PainelLateral
         isOpen={Boolean(editingRow)}
         onClose={() => setEditingRow(null)}
-        title={isNew ? 'Cadastrar Novo Participante' : `Editar: ${formName}`}
-        subtitle="Dados sensíveis são gravados separadamente em /participant_private (LGPD)"
+        title={isNew ? 'Cadastrar Atleta na Vitrine' : `Editar Atleta: ${formName}`}
+        subtitle="Vitrine esportiva pública (sem armazenamento de dados privados de responsáveis)"
         saveState={saveState}
         onSave={handleSaveParticipant}
       >
         <div className="space-y-4">
           <div className="space-y-1">
             <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
-              Projeto / Turma Vinculada *
+              Projeto Vinculado *
             </label>
             <select
               value={formProjectId}
               onChange={(e) => setFormProjectId(e.target.value)}
               className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
             >
-              {allowedProjects.map((p) => (
+              {projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                 </option>
@@ -728,7 +627,7 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <CampoTexto
-              label="Nome Completo"
+              label="Nome do Atleta"
               value={formName}
               onChange={setFormName}
               required
@@ -742,7 +641,7 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <CampoTexto
               label="Categoria"
               value={formCategory}
@@ -762,118 +661,63 @@ export const ParticipantesView: React.FC<ParticipantesViewProps> = ({
               onChange={setFormJersey}
               classification="público"
             />
+            <CampoTexto
+              label="Idade"
+              type="number"
+              value={formAge}
+              onChange={setFormAge}
+              classification="público"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
+                Nível do Card (Vitrine)
+              </label>
+              <select
+                value={formCardTier}
+                onChange={(e) =>
+                  setFormCardTier(e.target.value as 'ouro' | 'prata' | 'destaque')
+                }
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+              >
+                <option value="prata">Prata (Formação)</option>
+                <option value="ouro">Ouro (Titular)</option>
+                <option value="destaque">Destaque da Base</option>
+              </select>
+            </div>
+            <CampoTexto
+              label="Nota Geral (Overall 50–99)"
+              type="number"
+              value={formOverall}
+              onChange={setFormOverall}
+              classification="público"
+            />
           </div>
 
           <CampoUploadImagem
-            label="Foto do Aluno / Atleta"
+            label="Foto do Atleta"
             value={formPhotoUrl}
             onChange={setFormPhotoUrl}
             classification="público"
           />
 
-          <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                Dados Protegidos de Menor & Saúde (Coleção Privada LGPD)
-              </span>
-              <SeloSensivel level="sensível" />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <CampoTexto
-                label="Data de Nascimento"
-                type="date"
-                value={formBirthDate}
-                onChange={setFormBirthDate}
-                classification="sensível"
-              />
-              <CampoTexto
-                label="Idade"
-                type="number"
-                value={formAge}
-                onChange={setFormAge}
-                classification="sensível"
-              />
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              <CampoTexto
-                label="Altura"
-                value={formHeight}
-                onChange={setFormHeight}
-                placeholder="Ex: 1,65m"
-                classification="sensível"
-              />
-              <CampoTexto
-                label="Peso"
-                value={formWeight}
-                onChange={setFormWeight}
-                placeholder="Ex: 54kg"
-                classification="sensível"
-              />
-              <CampoTexto
-                label="IMC"
-                value={formBmi}
-                onChange={setFormBmi}
-                placeholder="Ex: 19.8"
-                classification="sensível"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <CampoTexto
-                label="Unidade Escolar"
-                value={formSchoolName}
-                onChange={setFormSchoolName}
-                classification="sensível"
-              />
-              <CampoTexto
-                label="Série / Ano Escolar"
-                value={formSchoolGrade}
-                onChange={setFormSchoolGrade}
-                classification="sensível"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <CampoTexto
-                label="Responsável Legal"
-                value={formResponsible}
-                onChange={setFormResponsible}
-                classification="sensível"
-              />
-              <CampoTexto
-                label="Código NextFit"
-                value={formNextfitCode}
-                onChange={setFormNextfitCode}
-                classification="interno"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <CampoTexto
-                label="Telefone do Responsável"
-                type="tel"
-                value={formPhone}
-                onChange={setFormPhone}
-                classification="sensível"
-              />
-              <CampoTexto
-                label="E-mail do Responsável"
-                type="email"
-                value={formEmail}
-                onChange={setFormEmail}
-                classification="sensível"
-              />
-            </div>
-          </div>
+          <CampoTexto
+            label="Resumo Técnico / Destaque Esportivo"
+            multiline
+            rows={3}
+            value={formScoutSummary}
+            onChange={setFormScoutSummary}
+            classification="público"
+          />
         </div>
       </PainelLateral>
 
       <ConfirmarExclusao
         isOpen={Boolean(deleteTarget)}
         itemName={deleteTarget?.participant.name || ''}
-        itemTypeLabel="participante"
+        itemTypeLabel="atleta da vitrine"
         onCancel={() => setDeleteTarget(null)}
         onConfirm={handleConfirmDelete}
       />

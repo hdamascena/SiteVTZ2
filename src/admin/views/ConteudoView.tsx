@@ -95,9 +95,6 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
     if (role === 'parceiro') {
       return section !== 'patrocinadores';
     }
-    if (role === 'professor') {
-      return section !== 'projetos';
-    }
     return true;
   }, [role, section]);
 
@@ -151,16 +148,12 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
 
   // ==================== 1. PROJETOS ====================
   if (section === 'projetos') {
-    const visibleProjects = projects
-      .filter((p) =>
-        role === 'professor' ? (profile.projectIds || []).includes(p.id) : true
-      )
-      .filter(
-        (p) =>
-          !search.trim() ||
-          p.name.toLowerCase().includes(search.toLowerCase()) ||
-          p.location.toLowerCase().includes(search.toLowerCase())
-      );
+    const visibleProjects = projects.filter(
+      (p) =>
+        !search.trim() ||
+        p.name.toLowerCase().includes(search.toLowerCase()) ||
+        p.location.toLowerCase().includes(search.toLowerCase())
+    );
 
     const openEditProject = (proj?: VitalizarProject) => {
       if (proj) {
@@ -317,7 +310,7 @@ export const ConteudoView: React.FC<ConteudoViewProps> = ({
                 className="pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
               />
             </div>
-            {!isReadOnly && role !== 'professor' && (
+            {!isReadOnly && (
               <button
                 type="button"
                 onClick={() => openEditProject()}

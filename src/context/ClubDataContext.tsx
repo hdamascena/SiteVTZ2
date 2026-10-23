@@ -21,7 +21,6 @@ import type {
   ScoutInquiryRecord,
   DonationPledgeRecord,
   VolunteerApplicationRecord,
-  AttendanceSessionRecord,
 } from '../types/index.ts';
 import {
   createAuditLogEntry,
@@ -36,25 +35,19 @@ import {
   collection,
   setDoc,
   deleteDoc,
-  query,
-  where,
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import type {
   AdminUserProfile,
-  ParticipantPrivateRecord,
   ProjectEnrollmentStatus,
 } from '../admin/types.ts';
 import {
   canRoleWriteCollection,
   filterPrivateCollectionsForUser,
   getReadablePrivateCollections,
-  splitParticipantPublicAndPrivate,
+  sanitizeShowcaseParticipant,
 } from '../admin/permissions.ts';
-import {
-  promoteVisitorToSupporter,
-  verifyFirebaseAdminAccess,
-} from '../services/firebaseService.ts';
+import { verifyFirebaseAdminAccess } from '../services/firebaseService.ts';
 
 export const INITIAL_GALLERY_ALBUMS: PastEventPhoto[] = [
   {
@@ -198,8 +191,6 @@ interface ClubDataContextType {
   rsvps: EventRsvpRecord[];
   addRsvp: (rsvp: Omit<EventRsvpRecord, 'id' | 'confirmationCode' | 'date'>) => string;
   projects: VitalizarProject[];
-  participantPrivateMap: Record<string, ParticipantPrivateRecord>;
-  saveParticipantPrivate: (record: ParticipantPrivateRecord) => Promise<void>;
   galleryAlbums: PastEventPhoto[];
   transparencyDocs: TransparencyDocument[];
   sponsors: Sponsor[];
@@ -252,7 +243,6 @@ const STORAGE_KEYS = {
   SPONSORS: 'vitalizar_db_sponsors',
   EVENTS: 'vitalizar_db_events',
   PROJECTS: 'vitalizar_db_projects',
-  PARTICIPANT_PRIVATE: 'vitalizar_db_participant_private',
   GALLERY: 'vitalizar_db_gallery',
   TRANSPARENCY: 'vitalizar_db_transparency',
   POLOS: 'vitalizar_db_polos',
@@ -441,9 +431,6 @@ function normalizeSiteSettings(raw?: Partial<SiteSettings> | null): SiteSettings
     volunteers: Array.isArray(raw.volunteers)
       ? raw.volunteers
       : DEFAULT_SITE_SETTINGS.volunteers || [],
-    attendanceSessions: Array.isArray(raw.attendanceSessions)
-      ? raw.attendanceSessions
-      : DEFAULT_SITE_SETTINGS.attendanceSessions || [],
   };
 }
 
@@ -710,11 +697,10 @@ function sanitizeForFirestore<T>(obj: T): T {
 const PRIVATE_SETTINGS_COLLECTIONS = {
   donationPledges: 'donation_pledges',
   volunteers: 'volunteer_applications',
-  attendanceSessions: 'attendance_sessions',
 } as const;
 
 function toPublicSiteSettings(settings: SiteSettings): SiteSettings {
-  const { donationPledges, attendanceSessions, volunteers, ...publicSettings } = settings;
+  const { donationPledges, volunteers, ...publicSettings } = settings;
   return {
     ...publicSettings,
     // The site only lists active volunteers, without their contact or motivation
@@ -835,10 +821,6 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 8. Audit Logs - hydrated only for admin/super_admin
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
 
-  const [participantPrivateMap, setParticipantPrivateMap] = useState<
-    Record<string, ParticipantPrivateRecord>
-  >({});
-
   const [isFirebaseActive, setIsFirebaseActive] = useState<boolean>(true);
   const [currentUserProfile, setCurrentUserProfile] =
     useState<AdminUserProfile | null>(null);
@@ -853,13 +835,11 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setContactMessages([]);
     setScoutInquiries([]);
     setAuditLogs([]);
-    setParticipantPrivateMap({});
     setSiteSettingsState((prev) => toPublicSiteSettings(prev));
     try {
       localStorage.removeItem(STORAGE_KEYS.RSVPS);
       localStorage.removeItem(STORAGE_KEYS.MESSAGES);
       localStorage.removeItem(STORAGE_KEYS.SCOUT_INQUIRIES);
-      localStorage.removeItem(STORAGE_KEYS.PARTICIPANT_PRIVATE);
       localStorage.removeItem(STORAGE_KEYS.LOGS);
     } catch {
       // ignore
@@ -902,9 +882,7 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const res = await verifyFirebaseAdminAccess(user);
     const sqlProfile = await syncUserWithSqlBackend(token, res.profile);
     const resolvedProfile =
-      res.profile?.role === 'visitante' &&
-      sqlProfile &&
-      sqlProfile.role !== 'visitante'
+      sqlProfile && sqlProfile.ativo
         ? sqlProfile
         : res.profile || sqlProfile || null;
     setCurrentUserProfile(resolvedProfile);
@@ -973,7 +951,6 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   ...remoteSettings,
                   donationPledges: prev.donationPledges,
                   volunteers: prev.volunteers,
-                  attendanceSessions: prev.attendanceSessions,
                 }
               : remoteSettings;
             localStorage.setItem(STORAGE_KEYS.SITE_SETTINGS, JSON.stringify(merged));
@@ -1095,9 +1072,7 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         token ? syncUserWithSqlBackend(token, null) : Promise.resolve(null),
       ]);
       const activeProfile =
-        accessRes.profile?.role === 'visitante' &&
-        sqlProfile &&
-        sqlProfile.role !== 'visitante'
+        sqlProfile && sqlProfile.ativo
           ? sqlProfile
           : accessRes.profile || sqlProfile || null;
 
@@ -1111,21 +1086,9 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       const role = activeProfile.role;
       const readableCols = new Set(getReadablePrivateCollections(role));
-      const profProjectIds = (activeProfile.projectIds || []).slice(0, 30);
 
       const queryFsCollection = (colName: string) => {
         if (!readableCols.has(colName)) return Promise.resolve(null);
-        if (role === 'professor') {
-          if (profProjectIds.length === 0) return Promise.resolve(null);
-          return getDocs(
-            query(collection(db, colName), where('projectId', 'in', profProjectIds))
-          );
-        }
-        if (role === 'visitante' || role === 'apoiador') {
-          return getDocs(
-            query(collection(db, colName), where('userId', '==', user.uid))
-          );
-        }
         return getDocs(collection(db, colName));
       };
 
@@ -1136,8 +1099,6 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         scoutRes,
         pledgeRes,
         volRes,
-        attendanceRes,
-        partPrivRes,
         logsRes,
       ] = await Promise.allSettled([
         token
@@ -1150,8 +1111,6 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         queryFsCollection('scout_inquiries'),
         queryFsCollection(PRIVATE_SETTINGS_COLLECTIONS.donationPledges),
         queryFsCollection(PRIVATE_SETTINGS_COLLECTIONS.volunteers),
-        queryFsCollection(PRIVATE_SETTINGS_COLLECTIONS.attendanceSessions),
-        queryFsCollection('participant_private'),
         queryFsCollection('audit_logs'),
       ]);
 
@@ -1188,46 +1147,17 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           (sqlAdminCols.volunteer_applications || []) as VolunteerApplicationRecord[],
           extractDocs<VolunteerApplicationRecord>(volRes)
         ),
-        attendance_sessions: mergeRemoteFirst(
-          (sqlAdminCols.attendance_sessions || []) as AttendanceSessionRecord[],
-          extractDocs<AttendanceSessionRecord>(attendanceRes)
-        ),
-        participant_private: mergeRemoteFirst(
-          (sqlAdminCols.participant_private || []) as ParticipantPrivateRecord[],
-          extractDocs<ParticipantPrivateRecord>(partPrivRes)
-        ),
         audit_logs: mergeRemoteFirst(
           (sqlAdminCols.audit_logs || []) as AuditLogEntry[],
           extractDocs<AuditLogEntry>(logsRes)
         ),
       };
 
-      const filtered = filterPrivateCollectionsForUser(
-        rawCombined,
-        activeProfile,
-        projects
-      );
+      const filtered = filterPrivateCollectionsForUser(rawCombined, activeProfile);
 
       setRsvps(filtered.rsvps as EventRsvpRecord[]);
       setContactMessages(filtered.contact_messages as ContactMessageRecord[]);
       setScoutInquiries(filtered.scout_inquiries as ScoutInquiryRecord[]);
-
-      const privMap: Record<string, ParticipantPrivateRecord> = {};
-      if (role === 'super_admin' || role === 'admin' || role === 'professor') {
-        const allowedProjSet =
-          role === 'professor' ? new Set(activeProfile.projectIds || []) : null;
-        VITALIZAR_PROJECTS.forEach((pr) => {
-          if (allowedProjSet && !allowedProjSet.has(pr.id)) return;
-          (pr.participants || []).forEach((pt) => {
-            const { privateRecord } = splitParticipantPublicAndPrivate(pt, pr.id);
-            privMap[pt.id] = privateRecord;
-          });
-        });
-      }
-      (filtered.participant_private as ParticipantPrivateRecord[]).forEach((rec) => {
-        if (rec?.id) privMap[rec.id] = rec;
-      });
-      setParticipantPrivateMap(privMap);
 
       const nextLogs = (filtered.audit_logs as AuditLogEntry[]).sort((a, b) =>
         (b.timestamp || '').localeCompare(a.timestamp || '')
@@ -1242,7 +1172,6 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           role === 'super_admin' || role === 'admin'
             ? (filtered.volunteer_applications as VolunteerApplicationRecord[])
             : prev.volunteers,
-        attendanceSessions: filtered.attendance_sessions as AttendanceSessionRecord[],
       }));
 
       // If user is admin/super_admin, ensure empty public collections in Cloud SQL & Firestore are seeded
@@ -1343,8 +1272,8 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
           if (pubProjects.status === 'fulfilled' && pubProjects.value.empty) {
             normalizeProjects(VITALIZAR_PROJECTS).forEach((proj) => {
-              const publicParticipants = (proj.participants || []).map(
-                (pt) => splitParticipantPublicAndPrivate(pt, proj.id).publicParticipant
+              const publicParticipants = (proj.participants || []).map((pt) =>
+                sanitizeShowcaseParticipant(pt)
               );
               seedWrites.push(
                 setDoc(
@@ -1356,8 +1285,8 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
           if (!sqlPublicCols.projects?.length) {
             normalizeProjects(VITALIZAR_PROJECTS).forEach((proj) => {
-              const publicParticipants = (proj.participants || []).map(
-                (pt) => splitParticipantPublicAndPrivate(pt, proj.id).publicParticipant
+              const publicParticipants = (proj.participants || []).map((pt) =>
+                sanitizeShowcaseParticipant(pt)
               );
               seedWrites.push(
                 seedSql(
@@ -1491,19 +1420,6 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const saveParticipantPrivate = async (record: ParticipantPrivateRecord) => {
-    setParticipantPrivateMap((prev) => {
-      const next = { ...prev, [record.id]: record };
-      localStorage.setItem(STORAGE_KEYS.PARTICIPANT_PRIVATE, JSON.stringify(next));
-      return next;
-    });
-    const sanitized = sanitizeForFirestore(record);
-    await Promise.allSettled([
-      setDoc(doc(db, 'participant_private', record.id), sanitized),
-      persistAdminRecordToSql('participant_private', record.id, sanitized),
-    ]);
-  };
-
   // Visitor submissions: the admin only sees them if this write reaches Firestore, so tell the visitor when it fails
   const submitRecord = (collectionName: string, record: { id: string }) => {
     const sanitized = sanitizeForFirestore(record);
@@ -1538,9 +1454,6 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return updated;
     });
     submitRecord(PRIVATE_SETTINGS_COLLECTIONS.donationPledges, enrichedPledge);
-    if (auth.currentUser?.uid) {
-      promoteVisitorToSupporter(auth.currentUser.uid).catch(() => {});
-    }
   };
 
   const addVolunteerApplication = (application: VolunteerApplicationRecord) => {
@@ -1930,7 +1843,7 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         });
       };
 
-      const userRole = currentUserProfile?.role || 'visitante';
+      const userRole = currentUserProfile?.role || 'parceiro';
 
       if (payload.clubInfo !== undefined && canRoleWriteCollection(userRole, 'club_info')) {
         put('club_info', 'main', normalizeClubInfo(payload.clubInfo));
@@ -1970,31 +1883,12 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       if (payload.projects !== undefined && canRoleWriteCollection(userRole, 'projects')) {
         const normalized = normalizeProjects(payload.projects);
-        const nextPrivateMap: Record<string, ParticipantPrivateRecord> = {
-          ...participantPrivateMap,
-        };
-        const publicProjects = normalized.map((proj) => {
-          const publicParticipants = (proj.participants || []).map((pt) => {
-            const { publicParticipant, privateRecord } = splitParticipantPublicAndPrivate(
-              pt,
-              proj.id
-            );
-            const hasSensitive =
-              Boolean(pt.birthDate) ||
-              Boolean(pt.weight) ||
-              Boolean(pt.height) ||
-              Boolean(pt.bmi) ||
-              Boolean(pt.nextfitCode) ||
-              Boolean(pt.schoolInfo?.schoolName);
-            if (hasSensitive) {
-              nextPrivateMap[pt.id] = privateRecord;
-              put('participant_private', pt.id, privateRecord);
-            }
-            return publicParticipant;
-          });
-          return { ...proj, participants: publicParticipants };
-        });
-        setParticipantPrivateMap(nextPrivateMap);
+        const publicProjects = normalized.map((proj) => ({
+          ...proj,
+          participants: (proj.participants || []).map((pt) =>
+            sanitizeShowcaseParticipant(pt)
+          ),
+        }));
         syncList('projects', publicProjects, projects, true);
       }
       if (payload.galleryAlbums !== undefined && canRoleWriteCollection(userRole, 'gallery_albums')) {
@@ -2062,8 +1956,6 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         rsvps,
         addRsvp,
         projects,
-        participantPrivateMap,
-        saveParticipantPrivate,
         galleryAlbums,
         transparencyDocs,
         facilityPolos,

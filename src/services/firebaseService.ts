@@ -11,6 +11,7 @@ import {
 } from 'firebase/auth';
 import { db, auth } from '../firebase.ts';
 import type { AdminRole, AdminUserProfile, AdminInviteRecord } from '../admin/types.ts';
+import { normalizeAdminRole } from '../admin/permissions.ts';
 
 export const PRIMARY_ADMIN_EMAIL = 'higor.rock2011@gmail.com';
 
@@ -20,9 +21,9 @@ export function formatFirebaseAuthError(error: any): string {
     case 'auth/invalid-credential':
     case 'auth/wrong-password':
     case 'auth/user-not-found':
-      return 'E-mail ou senha incorretos, ou esta conta ainda não possui senha cadastrada (use "Continuar com Conta Google" ou clique em "Criar Conta" abaixo).';
+      return 'E-mail ou senha incorretos, ou esta conta ainda não possui senha cadastrada.';
     case 'auth/email-already-in-use':
-      return 'Este e-mail já está cadastrado. Clique em "Já tenho conta (Fazer Login)" ou entre com o Google.';
+      return 'Este e-mail já está cadastrado. Use "Já tenho conta (Entrar)" ou entre com o Google.';
     case 'auth/weak-password':
       return 'A senha deve ter pelo menos 6 caracteres.';
     case 'auth/invalid-email':
@@ -59,20 +60,21 @@ export async function verifyFirebaseAdminAccess(
   const emailClean = user.email.trim().toLowerCase();
   const isPrimaryOwner = emailClean === PRIMARY_ADMIN_EMAIL.toLowerCase();
 
-  // 1. Check existing /admins/{uid}
   try {
     const adminRef = doc(db, 'admins', user.uid);
     const adminDoc = await getDoc(adminRef);
 
+    // 1. Check existing /admins/{uid}
     if (adminDoc.exists()) {
       const data = adminDoc.data();
+      const isLegacyVisitor = data.role === 'visitante' || data.role === 'apoiador';
       const profile: AdminUserProfile = {
         uid: user.uid,
         email: data.email || user.email,
         nome: data.nome || user.displayName || user.email.split('@')[0],
-        role: isPrimaryOwner ? 'super_admin' : ((data.role as AdminRole) || 'visitante'),
+        role: isPrimaryOwner ? 'super_admin' : normalizeAdminRole(data.role),
         projectIds: Array.isArray(data.projectIds) ? data.projectIds : [],
-        ativo: isPrimaryOwner ? true : data.ativo !== false,
+        ativo: isPrimaryOwner ? true : isLegacyVisitor ? false : data.ativo !== false,
         criadoEm: data.criadoEm || new Date().toISOString(),
         criadoPor: data.criadoPor || 'sistema',
       };
@@ -92,7 +94,7 @@ export async function verifyFirebaseAdminAccess(
           authorized: false,
           role: 'unauthorized',
           profile,
-          reason: `O acesso da conta (${user.email}) foi desativado pela coordenação.`,
+          reason: `Esta conta (${user.email}) não possui acesso ativo ao painel de gestão.`,
         };
       }
 
@@ -131,65 +133,54 @@ export async function verifyFirebaseAdminAccess(
       };
     }
 
-    // 3. Check /admin_invites/{email} if email is verified
-    if (user.emailVerified) {
-      const inviteRef = doc(db, 'admin_invites', emailClean);
-      const inviteSnap = await getDoc(inviteRef).catch(() => null);
-      if (inviteSnap && inviteSnap.exists()) {
-        const inv = inviteSnap.data() as AdminInviteRecord;
-        const invitedProfile: AdminUserProfile = {
-          uid: user.uid,
-          email: user.email,
-          nome: inv.nome || user.displayName || user.email.split('@')[0],
-          role: inv.role,
-          projectIds: Array.isArray(inv.projectIds) ? inv.projectIds : [],
-          ativo: true,
-          criadoEm: new Date().toISOString(),
-          criadoPor: inv.criadoPor || 'convite',
-        };
-        await setDoc(adminRef, {
-          email: invitedProfile.email,
-          nome: invitedProfile.nome,
-          role: invitedProfile.role,
-          projectIds: invitedProfile.projectIds,
-          ativo: true,
-          criadoEm: invitedProfile.criadoEm,
-          criadoPor: invitedProfile.criadoPor,
-        });
-        await deleteDoc(inviteRef).catch(() => {});
-        return {
-          authorized: true,
-          role: invitedProfile.role,
-          profile: invitedProfile,
-        };
-      }
+    // 3. Check /admin_invites/{email}
+    const inviteRef = doc(db, 'admin_invites', emailClean);
+    const inviteSnap = await getDoc(inviteRef).catch(() => null);
+    if (inviteSnap && inviteSnap.exists()) {
+      const inv = inviteSnap.data() as AdminInviteRecord;
+      const invitedProfile: AdminUserProfile = {
+        uid: user.uid,
+        email: user.email,
+        nome: inv.nome || user.displayName || user.email.split('@')[0],
+        role: normalizeAdminRole(inv.role),
+        projectIds: Array.isArray(inv.projectIds) ? inv.projectIds : [],
+        ativo: true,
+        criadoEm: new Date().toISOString(),
+        criadoPor: inv.criadoPor || 'convite',
+      };
+      await setDoc(adminRef, {
+        email: invitedProfile.email,
+        nome: invitedProfile.nome,
+        role: invitedProfile.role,
+        projectIds: invitedProfile.projectIds,
+        ativo: true,
+        criadoEm: invitedProfile.criadoEm,
+        criadoPor: invitedProfile.criadoPor,
+      }).catch(() => {});
+      await deleteDoc(inviteRef).catch(() => {});
+      return {
+        authorized: true,
+        role: invitedProfile.role,
+        profile: invitedProfile,
+      };
     }
 
-    // 4. Default self-registration as 'visitante'
-    const visitorProfile: AdminUserProfile = {
+    // 4. Uninvited user -> inactive profile (showcase panel is restricted to invited team/partners)
+    const inactiveProfile: AdminUserProfile = {
       uid: user.uid,
       email: user.email,
       nome: user.displayName || user.email.split('@')[0],
-      role: 'visitante',
+      role: 'parceiro',
       projectIds: [],
-      ativo: true,
+      ativo: false,
       criadoEm: new Date().toISOString(),
-      criadoPor: 'auto_cadastro',
+      criadoPor: 'nao_autorizado',
     };
-    await setDoc(adminRef, {
-      email: visitorProfile.email,
-      nome: visitorProfile.nome,
-      role: visitorProfile.role,
-      projectIds: [],
-      ativo: true,
-      criadoEm: visitorProfile.criadoEm,
-      criadoPor: visitorProfile.criadoPor,
-    }).catch(() => {});
-
     return {
-      authorized: true,
-      role: 'visitante',
-      profile: visitorProfile,
+      authorized: false,
+      role: 'unauthorized',
+      profile: inactiveProfile,
+      reason: 'Acesso restrito à equipe institucional e parceiros convidados.',
     };
   } catch {
     if (isPrimaryOwner) {
@@ -208,20 +199,19 @@ export async function verifyFirebaseAdminAccess(
         },
       };
     }
-    const fallbackVisitor: AdminUserProfile = {
-      uid: user.uid,
-      email: user.email,
-      nome: user.displayName || user.email.split('@')[0],
-      role: 'visitante',
-      projectIds: [],
-      ativo: true,
-      criadoEm: new Date().toISOString(),
-      criadoPor: 'auto_cadastro',
-    };
     return {
-      authorized: true,
-      role: 'visitante',
-      profile: fallbackVisitor,
+      authorized: false,
+      role: 'unauthorized',
+      profile: {
+        uid: user.uid,
+        email: user.email,
+        nome: user.displayName || user.email.split('@')[0],
+        role: 'parceiro',
+        projectIds: [],
+        ativo: false,
+        criadoEm: new Date().toISOString(),
+        criadoPor: 'nao_autorizado',
+      },
     };
   }
 }
@@ -229,32 +219,6 @@ export async function verifyFirebaseAdminAccess(
 async function getAuthHeader(): Promise<Record<string, string>> {
   const token = await auth.currentUser?.getIdToken().catch(() => null);
   return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-export async function promoteVisitorToSupporter(uid: string): Promise<boolean> {
-  try {
-    const adminRef = doc(db, 'admins', uid);
-    const snap = await getDoc(adminRef).catch(() => null);
-    const data = snap && snap.exists() ? snap.data() : null;
-    if (data && data.role !== 'visitante') return true;
-    const updated = {
-      ...(data || {}),
-      uid,
-      role: 'apoiador',
-    };
-    const headers = await getAuthHeader();
-    await Promise.allSettled([
-      data ? setDoc(adminRef, { ...data, role: 'apoiador' }) : Promise.resolve(),
-      fetch('/api/collections/admins', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...headers },
-        body: JSON.stringify({ itemId: uid, payload: updated }),
-      }),
-    ]);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export async function fetchAllAdminsAndInvites(): Promise<{
@@ -277,9 +241,9 @@ export async function fetchAllAdminsAndInvites(): Promise<{
         uid: d.id,
         email: raw.email || '',
         nome: raw.nome || raw.email || d.id,
-        role: (raw.role as AdminRole) || 'visitante',
+        role: normalizeAdminRole(raw.role),
         projectIds: Array.isArray(raw.projectIds) ? raw.projectIds : [],
-        ativo: raw.ativo !== false,
+        ativo: raw.ativo !== false && raw.role !== 'visitante' && raw.role !== 'apoiador',
         criadoEm: raw.criadoEm || '',
         criadoPor: raw.criadoPor || '',
       });
@@ -294,9 +258,9 @@ export async function fetchAllAdminsAndInvites(): Promise<{
           uid: String(raw.uid),
           email: String(raw.email || ''),
           nome: String(raw.nome || raw.email || raw.uid),
-          role: (raw.role as AdminRole) || 'visitante',
+          role: normalizeAdminRole(raw.role),
           projectIds: Array.isArray(raw.projectIds) ? raw.projectIds : [],
-          ativo: raw.ativo !== false,
+          ativo: raw.ativo !== false && raw.role !== 'visitante' && raw.role !== 'apoiador',
           criadoEm: String(raw.criadoEm || ''),
           criadoPor: String(raw.criadoPor || ''),
         });
@@ -313,7 +277,7 @@ export async function fetchAllAdminsAndInvites(): Promise<{
       inviteMap.set(emailKey, {
         email: emailKey,
         nome: raw.nome || emailKey,
-        role: (raw.role as AdminRole) || 'professor',
+        role: normalizeAdminRole(raw.role),
         projectIds: Array.isArray(raw.projectIds) ? raw.projectIds : [],
         criadoEm: raw.criadoEm || '',
         criadoPor: raw.criadoPor || '',
@@ -329,7 +293,7 @@ export async function fetchAllAdminsAndInvites(): Promise<{
         inviteMap.set(emailKey, {
           email: emailKey,
           nome: String(raw.nome || emailKey),
-          role: (raw.role as AdminRole) || 'professor',
+          role: normalizeAdminRole(raw.role),
           projectIds: Array.isArray(raw.projectIds) ? raw.projectIds : [],
           criadoEm: String(raw.criadoEm || ''),
           criadoPor: String(raw.criadoPor || ''),
@@ -431,7 +395,7 @@ export async function loginWithEmailPasswordFirebase(
   }
 }
 
-export async function registerVisitorWithEmailFirebase(
+export async function registerInvitedWithEmailFirebase(
   nome: string,
   email: string,
   password: string

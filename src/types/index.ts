@@ -447,26 +447,6 @@ export interface VolunteerApplicationRecord {
   status: 'novo' | 'em_analise' | 'ativo';
 }
 
-export interface AttendanceEntry {
-  participantId: string;
-  participantName: string;
-  nextfitCode?: string;
-  category: string;
-  status: 'presente' | 'falta' | 'justificada';
-  notes?: string;
-}
-
-export interface AttendanceSessionRecord {
-  id: string;
-  projectId: string;
-  projectName: string;
-  date: string;
-  classTopic: string;
-  coordinator: string;
-  entries: AttendanceEntry[];
-  createdAt: string;
-}
-
 export interface SiteSettings {
   newsCategories: string[];
   eventCategories: string[];
@@ -497,5 +477,4 @@ export interface SiteSettings {
   matchResults?: MatchResultRecord[];
   clubTrophies?: ClubTrophyRecord[];
   volunteers?: VolunteerApplicationRecord[];
-  attendanceSessions?: AttendanceSessionRecord[];
 }

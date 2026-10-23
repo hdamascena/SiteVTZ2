@@ -39,18 +39,15 @@ const ALL_ROLES: AdminRole[] = [
   'super_admin',
   'admin',
   'editor',
-  'professor',
   'financeiro',
   'parceiro',
-  'apoiador',
-  'visitante',
 ];
 
 export const UsuariosLogView: React.FC<UsuariosLogViewProps> = ({
   section,
   profile,
 }) => {
-  const { projects, auditLogs, recordAuditEvent } = useClubData();
+  const { auditLogs, recordAuditEvent } = useClubData();
   const isSuperAdmin = profile.role === 'super_admin';
 
   // ==================== USUÁRIOS & CONVITES ====================
@@ -65,7 +62,7 @@ export const UsuariosLogView: React.FC<UsuariosLogViewProps> = ({
   const [newInvite, setNewInvite] = useState<AdminInviteRecord>({
     email: '',
     nome: '',
-    role: 'professor',
+    role: 'editor',
     projectIds: [],
     criadoEm: '',
     criadoPor: profile.email,
@@ -343,7 +340,7 @@ export const UsuariosLogView: React.FC<UsuariosLogViewProps> = ({
       setNewInvite({
         email: '',
         nome: '',
-        role: 'professor',
+        role: 'editor',
         projectIds: [],
         criadoEm: '',
         criadoPor: profile.email,
@@ -351,12 +348,6 @@ export const UsuariosLogView: React.FC<UsuariosLogViewProps> = ({
     } finally {
       setSavingUser(false);
     }
-  };
-
-  const toggleProjectInList = (list: string[], projectId: string): string[] => {
-    return list.includes(projectId)
-      ? list.filter((id) => id !== projectId)
-      : [...list, projectId];
   };
 
   const userColumns: ColunaTabela<AdminUserProfile>[] = [
@@ -380,11 +371,6 @@ export const UsuariosLogView: React.FC<UsuariosLogViewProps> = ({
           <span className="text-xs font-bold text-[#0284c7] dark:text-sky-400 block">
             {ROLE_LABELS[u.role] || u.role}
           </span>
-          {u.role === 'professor' && (
-            <span className="text-[11px] text-slate-500">
-              {u.projectIds?.length || 0} projeto(s) vinculado(s)
-            </span>
-          )}
         </div>
       ),
     },
@@ -442,7 +428,7 @@ export const UsuariosLogView: React.FC<UsuariosLogViewProps> = ({
             Usuários, Perfis de Acesso e Convites
           </h2>
           <p className="text-xs text-slate-500">
-            Gerencie perfis internos (Super Admin, Admin, Editor, Professor, Financeiro) e comunitários (Parceiro, Apoiador, Visitante).
+            Gerencie perfis da vitrine institucional (Super Admin, Admin, Editor, Financeiro e Parceiro).
           </p>
         </div>
 
@@ -588,38 +574,6 @@ export const UsuariosLogView: React.FC<UsuariosLogViewProps> = ({
               </p>
             </div>
 
-            {editingUser.role === 'professor' && (
-              <div className="space-y-2 border border-slate-200 dark:border-slate-800 rounded-lg p-3">
-                <span className="block text-xs font-bold text-slate-800 dark:text-slate-200">
-                  Turmas / Projetos Vinculados ao Professor (projectIds)
-                </span>
-                <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {projects.map((proj) => (
-                    <label
-                      key={proj.id}
-                      className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={(editingUser.projectIds || []).includes(proj.id)}
-                        onChange={() =>
-                          setEditingUser({
-                            ...editingUser,
-                            projectIds: toggleProjectInList(
-                              editingUser.projectIds || [],
-                              proj.id
-                            ),
-                          })
-                        }
-                        className="rounded border-slate-300"
-                      />
-                      <span>{proj.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-
             <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
               <label className="flex items-center justify-between gap-3 cursor-pointer">
                 <div>
@@ -691,38 +645,6 @@ export const UsuariosLogView: React.FC<UsuariosLogViewProps> = ({
               {ROLE_DESCRIPTIONS[newInvite.role]}
             </p>
           </div>
-
-          {newInvite.role === 'professor' && (
-            <div className="space-y-2 border border-slate-200 dark:border-slate-800 rounded-lg p-3">
-              <span className="block text-xs font-bold text-slate-800 dark:text-slate-200">
-                Selecione as Turmas do Professor (projectIds)
-              </span>
-              <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                {projects.map((proj) => (
-                  <label
-                    key={proj.id}
-                    className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={newInvite.projectIds.includes(proj.id)}
-                      onChange={() =>
-                        setNewInvite({
-                          ...newInvite,
-                          projectIds: toggleProjectInList(
-                            newInvite.projectIds,
-                            proj.id
-                          ),
-                        })
-                      }
-                      className="rounded border-slate-300"
-                    />
-                    <span>{proj.name}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </PainelLateral>
 

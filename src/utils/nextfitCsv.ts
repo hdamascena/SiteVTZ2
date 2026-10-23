@@ -9,9 +9,9 @@ import type {
  * Strictly NO contact/phone/email/CPF columns per privacy requirements.
  */
 export const NEXTFIT_SAMPLE_CSV_CONTENT = [
-  'Codigo NextFit;Nome do Atleta;Data de Nascimento;Idade;Situacao Matricula;Modalidade / Turma;Plano / Contrato;Posicao;Altura (m);Peso (kg);Escola;Observacoes Avaliacao Fisica',
-  'NF-1001;Participante Exemplo 1;01/01/2012;14;Ativo;Futsal Iniciação Sub-15;Projeto Social Manhã;Meio-Campista;1,65;55kg;Unidade Escolar;Observação de avaliação física',
-  'NF-1002;Participante Exemplo 2;01/01/2013;13;Ativo;Futsal Base Sub-13;Projeto Social Tarde;Defensor;1,60;50kg;Unidade Escolar;Observação de avaliação física',
+  'Nome do Atleta;Idade;Situacao Matricula;Modalidade / Turma;Posicao;Observacoes Tecnicas',
+  'Participante Exemplo 1;14;Ativo;Futsal Iniciação Sub-15;Meio-Campista;Boa visão de jogo e liderança em quadra',
+  'Participante Exemplo 2;13;Ativo;Futsal Base Sub-13;Defensor;Marcação firme e saída rápida de bola',
 ].join('\r\n');
 
 const DEFAULT_AVATARS = [
@@ -384,14 +384,14 @@ export function convertNextFitRowToParticipant(
 ): ProjectParticipant {
   const posGroup = inferPositionGroup(row.position);
   return {
-    id: existingParticipant?.id || `ath-nf-${row.nextfitCode.replace(/[^a-zA-Z0-9_-]/g, '')}-${Date.now()}-${indexOffset}`,
+    id: existingParticipant?.id || `ath-${Date.now()}-${indexOffset}`,
     name: row.name,
     nickname: existingParticipant?.nickname || row.name.split(' ')[0],
-    nextfitCode: row.nextfitCode,
+    nextfitCode: '',
     enrollmentStatus: row.enrollmentStatus,
-    modalityOrClass: row.modalityOrClass,
-    planName: row.planName,
-    bmi: row.bmi,
+    modalityOrClass: '',
+    planName: '',
+    bmi: '',
     lastSyncDate: new Date().toLocaleDateString('pt-BR'),
     photoUrl: existingParticipant?.photoUrl || row.photoUrl,
     jerseyNumber: existingParticipant?.jerseyNumber || ((indexOffset % 18) + 2),
@@ -399,10 +399,10 @@ export function convertNextFitRowToParticipant(
     positionGroup: posGroup,
     preferredFoot: existingParticipant?.preferredFoot || 'Destro',
     age: row.age || existingParticipant?.age || 14,
-    birthDate: row.birthDate || existingParticipant?.birthDate || `${2026 - (row.age || 14)}`,
+    birthDate: '',
     category: row.category || existingParticipant?.category || 'Sub-15',
-    height: row.height || existingParticipant?.height || '1,68m',
-    weight: row.weight || existingParticipant?.weight || '58kg',
+    height: '',
+    weight: '',
     cardTier: row.enrollmentStatus === 'ativo' ? 'destaque' : 'prata',
     stats: existingParticipant?.stats || {
       pace: 82,
@@ -414,18 +414,18 @@ export function convertNextFitRowToParticipant(
       overall: 81,
     },
     schoolInfo: {
-      schoolName: row.schoolName || existingParticipant?.schoolInfo?.schoolName || 'Rede Pública Municipal de Cariacica',
-      grade: existingParticipant?.schoolInfo?.grade || 'Ensino Fundamental / Médio',
-      turn: existingParticipant?.schoolInfo?.turn || 'Matutino',
-      attendanceRate: existingParticipant?.schoolInfo?.attendanceRate || '96%',
+      schoolName: '',
+      grade: '',
+      turn: 'Matutino',
+      attendanceRate: '',
     },
     highlights: existingParticipant?.highlights || [
-      `${row.modalityOrClass} • Next Fit (${row.nextfitCode})`,
+      `Destaque ${row.category || 'Base'}`,
     ],
     scoutReport: existingParticipant?.scoutReport || {
       summary:
         row.notes ||
-        `Atleta integrante da turma ${row.modalityOrClass}, com avaliação antropométrica em dia (${row.height}, ${row.weight}, IMC ${row.bmi}).`,
+        `Atleta integrante da categoria ${row.category || 'Base'}.`,
       strengths: ['Comprometimento nos treinos', 'Condicionamento físico', 'Disciplina tática'],
       developmentAreas: ['Evolução contínua de fundamentos'],
       scoutRating: '4.7 / 5.0',
@@ -436,8 +436,8 @@ export function convertNextFitRowToParticipant(
 }
 
 /**
- * Merges imported Next Fit rows into existing projects' participants lists.
- * Deduplicates by nextfitCode or case-insensitive name within the target project.
+ * Merges imported rows into existing projects' participants lists.
+ * Deduplicates by case-insensitive name within the target project.
  */
 export function mergeNextFitRowsIntoProjects(
   projects: VitalizarProject[],
@@ -470,11 +470,7 @@ export function mergeNextFitRowsIntoProjects(
     const proj = projectMap.get(targetId)!;
     const list = proj.participants || [];
     const existingIdx = list.findIndex(
-      (p) =>
-        (p.nextfitCode &&
-          row.nextfitCode &&
-          p.nextfitCode.toLowerCase() === row.nextfitCode.toLowerCase()) ||
-        stripAccents(p.name) === stripAccents(row.name)
+      (p) => stripAccents(p.name) === stripAccents(row.name)
     );
 
     const converted = convertNextFitRowToParticipant(row, list.length + idx);
@@ -484,21 +480,23 @@ export function mergeNextFitRowsIntoProjects(
       list[existingIdx] = {
         ...prev,
         name: row.name,
-        nextfitCode: row.nextfitCode || prev.nextfitCode,
+        nextfitCode: '',
         enrollmentStatus: row.enrollmentStatus,
-        modalityOrClass: row.modalityOrClass || prev.modalityOrClass,
-        planName: row.planName || prev.planName,
-        bmi: row.bmi || prev.bmi,
+        modalityOrClass: '',
+        planName: '',
+        bmi: '',
         lastSyncDate: converted.lastSyncDate,
         age: row.age || prev.age,
-        birthDate: row.birthDate || prev.birthDate,
+        birthDate: '',
         category: row.category || prev.category,
         position: row.position || prev.position,
-        height: row.height || prev.height,
-        weight: row.weight || prev.weight,
+        height: '',
+        weight: '',
         schoolInfo: {
-          ...prev.schoolInfo,
-          schoolName: row.schoolName || prev.schoolInfo?.schoolName || 'Rede Pública Municipal',
+          schoolName: '',
+          grade: '',
+          turn: 'Matutino',
+          attendanceRate: '',
         },
         scoutReport: {
           ...prev.scoutReport,

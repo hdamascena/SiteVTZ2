@@ -13,13 +13,13 @@ import {
   saveUploadedFile,
   getUploadedFile,
   resolveUserProfile,
+  purgeObsoleteCollections,
 } from './src/db/users.ts';
 import {
   getReadablePrivateCollections,
   canRoleWriteCollection,
   canRoleDeleteFromCollection,
   filterPrivateCollectionsForUser,
-  resolveProjectIdFromRsvp,
 } from './src/admin/permissions.ts';
 
 const PUBLIC_COLLECTION_NAMES = [
@@ -48,6 +48,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  await purgeObsoleteCollections();
+
   app.use(express.json({ limit: '25mb' }));
 
   app.post('/api/me', requireAuth, async (req: AuthRequest, res) => {
@@ -75,9 +77,7 @@ async function startServer() {
       const { profile } = await resolveUserProfile(req.user.uid, req.user.email || '');
       if (
         !profile.ativo ||
-        (profile.role !== 'super_admin' &&
-          profile.role !== 'admin' &&
-          profile.role !== 'financeiro')
+        (profile.role !== 'super_admin' && profile.role !== 'admin')
       ) {
         return res.status(403).json({ error: 'Forbidden' });
       }
@@ -116,17 +116,8 @@ async function startServer() {
         return res.status(403).json({ error: 'Account inactive' });
       }
       const readableNames = getReadablePrivateCollections(profile.role);
-      const queryNames =
-        profile.role === 'professor' && !readableNames.includes('projects')
-          ? [...readableNames, 'projects']
-          : readableNames;
-      const rawCollections = await getCollectionsByNames(queryNames);
-      const projectsList = (rawCollections.projects || []) as { id: string; name: string }[];
-      const collections = filterPrivateCollectionsForUser(
-        rawCollections,
-        profile,
-        projectsList
-      );
+      const rawCollections = await getCollectionsByNames(readableNames);
+      const collections = filterPrivateCollectionsForUser(rawCollections, profile);
       res.json({ collections, profile });
     } catch (error: any) {
       console.error('Failed to fetch admin bootstrap collections:', error);
@@ -197,43 +188,6 @@ async function startServer() {
           if (targetPayload?.role === 'super_admin') {
             return res.status(403).json({ error: 'Admin não pode alterar conta Super Admin.' });
           }
-        }
-        if (profile.role === 'financeiro' || profile.role === 'visitante' || profile.role === 'apoiador') {
-          if (collectionName !== 'admins' || dataObj.role !== 'apoiador') {
-            return res.status(403).json({ error: 'Operação não permitida para este perfil.' });
-          }
-        }
-      }
-
-      if (profile.role === 'professor') {
-        const allowedProjects = new Set(profile.projectIds || []);
-        const targetProjectId =
-          collectionName === 'projects'
-            ? String(itemId)
-            : collectionName === 'rsvps'
-            ? resolveProjectIdFromRsvp(dataObj as any, []) || String(dataObj.projectId || '')
-            : String(dataObj.projectId || '');
-        if (
-          collectionName !== 'audit_logs' &&
-          (!targetProjectId || !allowedProjects.has(targetProjectId))
-        ) {
-          return res.status(403).json({
-            error: 'Professor só pode gerenciar dados das turmas vinculadas ao seu perfil.',
-          });
-        }
-      }
-
-      if (
-        (profile.role === 'visitante' || profile.role === 'apoiador') &&
-        (collectionName === 'rsvps' || collectionName === 'donation_pledges')
-      ) {
-        const recordUid = String(dataObj.userId || '');
-        const recordEmail = String(dataObj.email || dataObj.donorEmail || '').trim().toLowerCase();
-        if (
-          recordUid !== profile.uid &&
-          recordEmail !== (profile.email || '').trim().toLowerCase()
-        ) {
-          return res.status(403).json({ error: 'Você só pode gerenciar seus próprios registros.' });
         }
       }
 

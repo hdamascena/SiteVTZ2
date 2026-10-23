@@ -119,19 +119,14 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               onClick={onOpenAdmin}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-sky-100 bg-white/10 hover:bg-white/20 hover:text-white rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
-              title="Entrar / Área do Usuário"
-              aria-label="Entrar / Área do Usuário"
+              title="Painel Institucional"
+              aria-label="Painel Institucional"
             >
               <Lock className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
               <span>
                 {currentUserProfile
-                  ? `${
-                      currentUserProfile.role === 'visitante' ||
-                      currentUserProfile.role === 'apoiador'
-                        ? 'Minha Área'
-                        : 'Painel'
-                    } (${currentUserProfile.nome.split(' ')[0]})`
-                  : 'Entrar'}
+                  ? `Painel (${currentUserProfile.nome.split(' ')[0]})`
+                  : 'Painel'}
               </span>
             </button>
           )}
@@ -225,13 +220,8 @@ export const Header: React.FC<HeaderProps> = ({
                     <Lock className="w-3.5 h-3.5 text-sky-400" />
                     <span>
                       {currentUserProfile
-                        ? `${
-                            currentUserProfile.role === 'visitante' ||
-                            currentUserProfile.role === 'apoiador'
-                              ? 'Minha Área'
-                              : 'Painel'
-                          } (${currentUserProfile.nome.split(' ')[0]})`
-                        : 'Entrar / Minha Área'}
+                        ? `Painel (${currentUserProfile.nome.split(' ')[0]})`
+                        : 'Painel Institucional'}
                     </span>
                   </button>
                 )}

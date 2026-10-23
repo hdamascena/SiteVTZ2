@@ -27,7 +27,6 @@ import type {
   ScoutInquiryRecord,
   VolunteerApplicationRecord,
 } from '../../types/index.ts';
-import { promoteVisitorToSupporter } from '../../services/firebaseService.ts';
 
 interface ComunidadeViewProps {
   profile: AdminUserProfile;
@@ -54,14 +53,12 @@ export const ComunidadeView: React.FC<ComunidadeViewProps> = ({
   } = useClubData();
 
   const role = profile.role;
-  const isCommunityRole = role === 'visitante' || role === 'apoiador';
 
   const allowedTabs = useMemo(() => {
     if (role === 'financeiro') return ['doacoes'];
     if (role === 'parceiro') return ['olheiros'];
-    if (isCommunityRole) return ['doacoes'];
     return ['mensagens', 'olheiros', 'voluntarios', 'doacoes'];
-  }, [role, isCommunityRole]);
+  }, [role]);
 
   const [activeTab, setActiveTab] = useState<string>(
     initialSubTab && allowedTabs.includes(initialSubTab)
@@ -89,20 +86,9 @@ export const ComunidadeView: React.FC<ComunidadeViewProps> = ({
 
   const pledges = siteSettings.donationPledges || [];
   const volunteers = siteSettings.volunteers || [];
+  const visiblePledges = pledges;
 
-  const visiblePledges = useMemo(() => {
-    if (isCommunityRole) {
-      return pledges.filter(
-        (d) =>
-          (d.userId && d.userId === profile.uid) ||
-          (d.donorEmail &&
-            d.donorEmail.toLowerCase() === profile.email.toLowerCase())
-      );
-    }
-    return pledges;
-  }, [pledges, isCommunityRole, profile]);
-
-  const handleConfirmDonationAndPromote = async (pledge: DonationPledgeRecord) => {
+  const handleConfirmDonation = async (pledge: DonationPledgeRecord) => {
     const updatedPledges = pledges.map((p) =>
       p.id === pledge.id ? { ...p, status: 'confirmado' as const } : p
     );
@@ -111,21 +97,17 @@ export const ComunidadeView: React.FC<ComunidadeViewProps> = ({
         ...siteSettings,
         donationPledges: updatedPledges,
       },
-      toastMessage: `Doação de "${pledge.donorName}" confirmada! Perfil atualizado para Apoiador.`,
+      toastMessage: `Doação PIX de "${pledge.donorName}" confirmada!`,
       logDetails: `Doação ${pledge.protocol} confirmada por ${profile.email}.`,
     });
 
-    if (pledge.userId) {
-      await promoteVisitorToSupporter(pledge.userId).catch(() => {});
-    }
-
     recordAuditEvent({
-      action: 'CONFIRMAR_DOACAO_PROMOVER_APOIADOR',
+      action: 'CONFIRMAR_DOACAO_PIX',
       collection: 'donation_pledges',
       itemId: pledge.id,
       role: profile.role,
       beforeSummary: 'registrado',
-      afterSummary: `confirmado (Apoiador: ${pledge.donorName})`,
+      afterSummary: `confirmado (${pledge.donorName})`,
     });
   };
 
@@ -518,30 +500,26 @@ export const ComunidadeView: React.FC<ComunidadeViewProps> = ({
     },
     {
       id: 'status',
-      header: 'Status / Perfil Apoiador',
+      header: 'Status PIX',
       align: 'right',
       render: (d) => (
         <div className="inline-flex items-center gap-2">
           {d.status === 'confirmado' ? (
             <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
               <Award className="w-3.5 h-3.5" />
-              <span>Confirmado (Apoiador)</span>
+              <span>Confirmado</span>
             </span>
-          ) : !isCommunityRole ? (
+          ) : (
             <button
               type="button"
-              onClick={() => handleConfirmDonationAndPromote(d)}
+              onClick={() => handleConfirmDonation(d)}
               className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg cursor-pointer inline-flex items-center gap-1"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Confirmar & Dar Perfil Apoiador</span>
+              <span>Confirmar PIX</span>
             </button>
-          ) : (
-            <span className="text-xs text-amber-600 font-semibold">
-              Em conferência
-            </span>
           )}
-          {canDeleteRecords(role) && !isCommunityRole && (
+          {canDeleteRecords(role) && (
             <button
               type="button"
               onClick={() =>
@@ -615,14 +593,12 @@ export const ComunidadeView: React.FC<ComunidadeViewProps> = ({
                   : 'text-slate-600 dark:text-slate-400'
               }`}
             >
-              {isCommunityRole
-                ? `Minhas Doações PIX (${visiblePledges.length})`
-                : `Doações PIX & Apoiadores (${visiblePledges.length})`}
+              Doações PIX ({visiblePledges.length})
             </button>
           )}
         </div>
 
-        {!isCommunityRole && <SeloSensivel level="sensível" />}
+        <SeloSensivel level="sensível" />
       </div>
 
       {activeTab === 'mensagens' && (

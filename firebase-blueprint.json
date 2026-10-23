@@ -161,7 +161,7 @@
       "type": "object",
       "properties": {
         "email": { "type": "string", "format": "email", "maxLength": 120 },
-        "role": { "type": "string", "enum": ["admin", "editor"] },
+        "role": { "type": "string", "enum": ["super_admin", "admin", "editor", "financeiro", "parceiro"] },
         "createdAt": { "type": "string", "maxLength": 50 }
       },
       "required": ["email", "role"]

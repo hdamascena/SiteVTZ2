@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// Associação Esportiva Vitalizar - Firestore Security Rules (RBAC + LGPD)
+// Associação Esportiva Vitalizar - Firestore Security Rules (Vitrine Institucional + LGPD)
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -33,14 +33,6 @@ service cloud.firestore {
       return isActive() && (role() in roles);
     }
 
-    function teachesProject(projectId) {
-      return isActive()
-        && role() == 'professor'
-        && ('projectIds' in adminData())
-        && (adminData().projectIds is list)
-        && (projectId in adminData().projectIds);
-    }
-
     function nonEmptyStr(val, max) {
       return val is string && val.size() > 0 && val.size() <= max;
     }
@@ -59,7 +51,6 @@ service cloud.firestore {
         && d.phones is list && d.phones.size() <= 10;
     }
 
-    // Pledges and attendance carry personal data and live in their own admin-only collections
     function validSiteSettings() {
       let d = request.resource.data;
       return nonEmptyStr(d.seoTitle, 200)
@@ -129,23 +120,6 @@ service cloud.firestore {
         && nonEmptyStr(d.fundingSource, 300)
         && optStr(d, 'imageUrl', 900000)
         && (!('participants' in d) || (d.participants is list && d.participants.size() <= 500));
-    }
-
-    function validParticipantPrivate(docId) {
-      let d = request.resource.data;
-      return d.id == docId
-        && nonEmptyStr(d.projectId, 120)
-        && nonEmptyStr(d.participantName, 200)
-        && optStr(d, 'birthDate', 40)
-        && optStr(d, 'weight', 40)
-        && optStr(d, 'height', 40)
-        && optStr(d, 'bmi', 40)
-        && optStr(d, 'nextfitCode', 80)
-        && optStr(d, 'planName', 120)
-        && optStr(d, 'responsibleName', 200)
-        && optStr(d, 'phone', 60)
-        && optStr(d, 'email', 200)
-        && optStr(d, 'healthNotes', 2000);
     }
 
     function validGalleryAlbum(docId) {
@@ -293,25 +267,12 @@ service cloud.firestore {
         && d.status in ['novo', 'em_analise', 'ativo'];
     }
 
-    function validAttendanceSession(docId) {
-      let d = request.resource.data;
-      return d.id == docId
-        && nonEmptyStr(d.projectId, 120)
-        && nonEmptyStr(d.projectName, 200)
-        && nonEmptyStr(d.date, 40)
-        && nonEmptyStr(d.classTopic, 300)
-        && nonEmptyStr(d.coordinator, 120)
-        && d.entries is list && d.entries.size() <= 500
-        && nonEmptyStr(d.createdAt, 60);
-    }
-
     function validAdminProfile() {
       let d = request.resource.data;
       return nonEmptyStr(d.email, 200)
         && nonEmptyStr(d.nome, 150)
         && d.role in [
-          'super_admin', 'admin', 'editor', 'professor',
-          'financeiro', 'parceiro', 'apoiador', 'visitante'
+          'super_admin', 'admin', 'editor', 'financeiro', 'parceiro'
         ]
         && d.projectIds is list && d.projectIds.size() <= 50
         && d.ativo is bool
@@ -355,7 +316,6 @@ service cloud.firestore {
           && (
             (isPrimarySuperAdmin() && request.resource.data.role == 'super_admin' && request.resource.data.ativo == true)
             || (request.auth.token.email_verified == true && validInviteMatches(request.auth.token.email))
-            || (request.resource.data.role == 'visitante' && request.resource.data.ativo == true && request.resource.data.projectIds.size() == 0)
           )
         )
       );
@@ -366,21 +326,6 @@ service cloud.firestore {
           hasRole(['admin'])
           && resource.data.role != 'super_admin'
           && request.resource.data.role != 'super_admin'
-        )
-        || (
-          hasRole(['financeiro'])
-          && resource.data.role == 'visitante'
-          && request.resource.data.role == 'apoiador'
-          && request.resource.data.ativo == resource.data.ativo
-        )
-        || (
-          request.auth != null
-          && request.auth.uid == uid
-          && resource.data.ativo == true
-          && request.resource.data.ativo == true
-          && resource.data.role == 'visitante'
-          && request.resource.data.role == 'apoiador'
-          && request.resource.data.projectIds == resource.data.projectIds
         )
       );
 
@@ -396,7 +341,7 @@ service cloud.firestore {
         || (request.auth != null && request.auth.token.email == email);
     }
 
-    // 2. Coleções Públicas
+    // 2. Coleções Públicas da Vitrine
     match /club_info/{docId} {
       allow read: if true;
       allow create, update: if hasRole(['super_admin', 'admin', 'editor']) && validClubInfo();
@@ -429,8 +374,7 @@ service cloud.firestore {
 
     match /projects/{docId} {
       allow read: if true;
-      allow create: if hasRole(['super_admin', 'admin', 'editor']) && validProject(docId);
-      allow update: if (hasRole(['super_admin', 'admin', 'editor']) || teachesProject(docId)) && validProject(docId);
+      allow create, update: if hasRole(['super_admin', 'admin', 'editor']) && validProject(docId);
       allow delete: if hasRole(['super_admin', 'admin']);
     }
 
@@ -451,31 +395,11 @@ service cloud.firestore {
       allow delete: if hasRole(['super_admin', 'admin']);
     }
 
-    // 3. Coleções Privadas e Sensíveis (LGPD)
-    match /participant_private/{docId} {
-      allow read: if hasRole(['super_admin', 'admin'])
-        || (resource != null && teachesProject(resource.data.projectId));
-      allow create, update: if (
-          hasRole(['super_admin', 'admin'])
-          || teachesProject(request.resource.data.projectId)
-        ) && validParticipantPrivate(docId);
-      allow delete: if hasRole(['super_admin', 'admin']);
-    }
-
+    // 3. Captação de Interesses e Comunidade
     match /rsvps/{docId} {
       allow create: if validRsvp(docId);
-      allow read: if hasRole(['super_admin', 'admin'])
-        || (resource != null && ('projectId' in resource.data) && resource.data.projectId is string && teachesProject(resource.data.projectId))
-        || (
-          request.auth != null && resource != null && (
-            (('userId' in resource.data) && resource.data.userId == request.auth.uid)
-            || (('email' in resource.data) && resource.data.email == request.auth.token.email)
-          )
-        );
-      allow update: if (
-          hasRole(['super_admin', 'admin'])
-          || (resource != null && ('projectId' in resource.data) && resource.data.projectId is string && teachesProject(resource.data.projectId))
-        ) && validRsvp(docId);
+      allow read: if hasRole(['super_admin', 'admin']);
+      allow update: if hasRole(['super_admin', 'admin']) && validRsvp(docId);
       allow delete: if hasRole(['super_admin', 'admin']);
     }
 
@@ -494,13 +418,7 @@ service cloud.firestore {
 
     match /donation_pledges/{docId} {
       allow create: if validDonationPledge(docId);
-      allow read: if hasRole(['super_admin', 'admin', 'financeiro'])
-        || (
-          request.auth != null && resource != null && (
-            (('userId' in resource.data) && resource.data.userId == request.auth.uid)
-            || (('donorEmail' in resource.data) && resource.data.donorEmail == request.auth.token.email)
-          )
-        );
+      allow read: if hasRole(['super_admin', 'admin', 'financeiro']);
       allow update: if hasRole(['super_admin', 'admin', 'financeiro']) && validDonationPledge(docId);
       allow delete: if hasRole(['super_admin', 'admin']);
     }
@@ -509,16 +427,6 @@ service cloud.firestore {
       allow create: if validVolunteerApplication(docId);
       allow read, delete: if hasRole(['super_admin', 'admin']);
       allow update: if hasRole(['super_admin', 'admin']) && validVolunteerApplication(docId);
-    }
-
-    match /attendance_sessions/{docId} {
-      allow read: if hasRole(['super_admin', 'admin'])
-        || (resource != null && teachesProject(resource.data.projectId));
-      allow create, update: if (
-          hasRole(['super_admin', 'admin'])
-          || teachesProject(request.resource.data.projectId)
-        ) && validAttendanceSession(docId);
-      allow delete: if hasRole(['super_admin', 'admin']);
     }
 
     match /audit_logs/{docId} {
@@ -532,29 +440,3 @@ service cloud.firestore {
     }
   }
 }
-
-// =========================================================================================
-// TABELA DE PERMISSÕES: PERFIL × COLEÇÃO × PERMISSÃO
-// =========================================================================================
-// Coleção                 | público ( s/ login ) | visitante | apoiador  | parceiro  | financeiro| professor           | editor    | admin     | super_admin
-// ------------------------+----------------------+-----------+-----------+-----------+-----------+---------------------+-----------+-----------+------------
-// club_info               | ler                  | ler       | ler       | ler       | ler       | ler                 | ler/gravar| ler/gravar| total
-// site_settings           | ler                  | ler       | ler       | ler       | ler (PIX) | ler                 | ler/gravar| ler/gravar| total
-// news_articles           | ler                  | ler       | ler       | ler       | ler       | ler                 | total     | total     | total
-// events                  | ler                  | ler       | ler       | ler       | ler       | ler                 | total     | total     | total
-// gallery_albums          | ler                  | ler       | ler       | ler       | ler       | ler                 | total     | total     | total
-// sponsors                | ler                  | ler       | ler       | ler/editar| ler       | ler                 | total     | total     | total
-// facility_polos          | ler                  | ler       | ler       | ler       | ler       | ler                 | ler/gravar| total     | total
-// transparency_docs       | ler                  | ler       | ler       | ler       | ler/conf. | ler                 | ler       | total     | total
-// projects                | ler                  | ler       | ler       | ler       | ler       | ler/editar (turmas) | ler/gravar| total     | total
-// participant_private     | -                    | -         | -         | -         | -         | ler/gravar (turmas) | -         | total     | total
-// attendance_sessions     | -                    | -         | -         | -         | -         | ler/gravar (turmas) | -         | total     | total
-// rsvps (inscrições)      | criar                | criar/próp| criar/próp| criar     | -         | ler/editar (turmas) | -         | total     | total
-// contact_messages        | criar                | criar     | criar     | criar     | -         | -                   | -         | total     | total
-// scout_inquiries         | criar                | criar     | criar     | criar/ler | -         | -                   | -         | total     | total
-// donation_pledges        | criar                | criar/próp| criar/próp| criar     | ler/conf. | -                   | -         | total     | total
-// volunteer_applications  | criar                | criar     | criar     | criar     | -         | -                   | -         | total     | total
-// admins                  | -                    | próp.     | próp.     | próp.     | prom.apoi.| próp.               | próp.     | exc.super | total
-// admin_invites           | -                    | ler próp. | ler próp. | ler próp. | ler próp. | ler próp.           | ler próp. | exc.super | total
-// audit_logs              | -                    | criar     | criar     | criar     | criar     | criar               | criar     | ler/criar | ler/criar
-// =========================================================================================

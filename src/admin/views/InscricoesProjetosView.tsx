@@ -11,10 +11,13 @@ import {
 } from 'lucide-react';
 import type {
   AdminUserProfile,
-  ParticipantPrivateRecord,
   ProjectEnrollmentStatus,
 } from '../types.ts';
-import { canImportCsv, resolveProjectIdFromRsvp } from '../permissions.ts';
+import {
+  canImportCsv,
+  resolveProjectIdFromRsvp,
+  sanitizeShowcaseParticipant,
+} from '../permissions.ts';
 import {
   CampoSensivelMascara,
   CampoTexto,
@@ -44,7 +47,7 @@ interface InscricoesProjetosViewProps {
 const STATUS_LABELS: Record<ProjectEnrollmentStatus, string> = {
   pendente: 'Pendente',
   em_analise: 'Em Análise',
-  aprovada: 'Matriculado',
+  aprovada: 'Aprovado na Vitrine',
   lista_espera: 'Lista de Espera',
   recusada: 'Recusada',
 };
@@ -58,20 +61,9 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
     rsvps,
     addRsvp,
     saveAdminChanges,
-    saveParticipantPrivate,
     recordAuditEvent,
     showToast,
   } = useClubData();
-
-  const isCommunityUser =
-    profile.role === 'visitante' || profile.role === 'apoiador';
-
-  const allowedProjects = useMemo(() => {
-    if (profile.role === 'professor') {
-      return projects.filter((p) => (profile.projectIds || []).includes(p.id));
-    }
-    return projects;
-  }, [projects, profile.role, profile.projectIds]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [projectFilter, setProjectFilter] = useState<string>('all');
@@ -80,32 +72,17 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
   // Drawer for new enrollment
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [saveState, setSaveState] = useState<SaveIndicatorState>('idle');
-  const [formProjectId, setFormProjectId] = useState(
-    allowedProjects[0]?.id || ''
-  );
-  const [formStudentName, setFormStudentName] = useState(
-    isCommunityUser ? profile.nome : ''
-  );
+  const [formProjectId, setFormProjectId] = useState(projects[0]?.id || '');
+  const [formStudentName, setFormStudentName] = useState('');
   const [formStudentAge, setFormStudentAge] = useState('12');
   const [formResponsible, setFormResponsible] = useState('');
   const [formPhone, setFormPhone] = useState('');
-  const [formEmail, setFormEmail] = useState(
-    isCommunityUser ? profile.email : ''
-  );
+  const [formEmail, setFormEmail] = useState('');
   const [formModality, setFormModality] = useState('Manhã (08h00 às 10h30)');
 
   const visibleEnrollments = useMemo(() => {
     return rsvps.filter((r) => {
-      if (isCommunityUser) {
-        return (
-          (r.userId && r.userId === profile.uid) ||
-          (r.email && r.email.toLowerCase() === profile.email.toLowerCase())
-        );
-      }
       const pid = resolveProjectIdFromRsvp(r, projects);
-      if (profile.role === 'professor') {
-        if (!pid || !(profile.projectIds || []).includes(pid)) return false;
-      }
       if (projectFilter !== 'all' && pid !== projectFilter) return false;
       const st = r.enrollmentStatus || 'pendente';
       if (statusFilter !== 'all' && st !== statusFilter) return false;
@@ -117,15 +94,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
         (r.eventTitle || '').toLowerCase().includes(q)
       );
     });
-  }, [
-    rsvps,
-    isCommunityUser,
-    profile,
-    projects,
-    projectFilter,
-    statusFilter,
-    searchQuery,
-  ]);
+  }, [rsvps, projects, projectFilter, statusFilter, searchQuery]);
 
   const handleUpdateStatus = (
     rsvp: EventRsvpRecord,
@@ -151,10 +120,10 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
 
   const handleApproveAndEnrollInProject = async (rsvp: EventRsvpRecord) => {
     const pid =
-      resolveProjectIdFromRsvp(rsvp, projects) || allowedProjects[0]?.id;
+      resolveProjectIdFromRsvp(rsvp, projects) || projects[0]?.id;
     const targetProject = projects.find((p) => p.id === pid);
     if (!targetProject) {
-      showToast('Selecione um projeto válido para matricular o aluno.', 'error');
+      showToast('Selecione um projeto válido para integrar o atleta.', 'error');
       return;
     }
 
@@ -173,7 +142,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
         : 'Vida Ativa';
 
     const newParticipantId = `part-${Date.now()}`;
-    const newParticipant: ProjectParticipant = {
+    const newParticipant: ProjectParticipant = sanitizeShowcaseParticipant({
       id: newParticipantId,
       name: cleanName,
       nickname: cleanName.split(' ')[0],
@@ -206,7 +175,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
         turn: 'Matutino',
         attendanceRate: '100%',
       },
-      highlights: ['Matriculado via Gestão de Inscrições Vitalizar'],
+      highlights: ['Integrado via Vitrine de Projetos Vitalizar'],
       scoutReport: {
         summary: 'Participante integrado regularmente às turmas do projeto.',
         strengths: ['Assiduidade', 'Espírito de equipe'],
@@ -215,19 +184,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
       },
       photos: [],
       videos: [],
-    };
-
-    const privateRecord: ParticipantPrivateRecord = {
-      id: newParticipantId,
-      projectId: targetProject.id,
-      participantName: cleanName,
-      responsibleName: rsvp.responsibleName || '',
-      phone: rsvp.phone || '',
-      email: rsvp.email || '',
-      updatedAt: new Date().toISOString(),
-    };
-
-    await saveParticipantPrivate(privateRecord).catch(() => {});
+    });
 
     const updatedProjects = projects.map((pr) => {
       if (pr.id !== targetProject.id) return pr;
@@ -271,7 +228,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
   const handleCreateEnrollment = (e: React.FormEvent) => {
     e.preventDefault();
     const proj =
-      projects.find((p) => p.id === formProjectId) || allowedProjects[0];
+      projects.find((p) => p.id === formProjectId) || projects[0];
     if (!proj || !formStudentName.trim() || !formPhone.trim()) return;
 
     setSaveState('saving');
@@ -310,7 +267,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
         return;
       }
       const targetProj =
-        projects.find((p) => p.id === projectFilter) || allowedProjects[0];
+        projects.find((p) => p.id === projectFilter) || projects[0];
       if (!targetProj) return;
 
       const newRecords: EventRsvpRecord[] = parsed.rows.map((row, idx) => ({
@@ -384,19 +341,26 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
     },
     {
       id: 'contato',
-      header: isCommunityUser ? 'Contato Registrado' : 'Contato (Sensível LGPD)',
-      render: (r) =>
-        isCommunityUser ? (
-          <div className="space-y-0.5 text-xs text-slate-600 dark:text-slate-300 font-mono">
-            <div>{r.phone}</div>
-            {r.email && <div className="text-[11px] text-slate-500">{r.email}</div>}
+      header: 'Contato (Sensível LGPD)',
+      render: (r) => (
+        <div className="space-y-1">
+          <div>
+            <CampoSensivelMascara
+              value={r.phone}
+              type="phone"
+              itemLabel={r.studentName || r.name}
+              collection="rsvps"
+              itemId={r.id}
+              onRevealAudit={(p) =>
+                recordAuditEvent({ ...p, role: profile.role })
+              }
+            />
           </div>
-        ) : (
-          <div className="space-y-1">
+          {r.email && (
             <div>
               <CampoSensivelMascara
-                value={r.phone}
-                type="phone"
+                value={r.email}
+                type="email"
                 itemLabel={r.studentName || r.name}
                 collection="rsvps"
                 itemId={r.id}
@@ -405,22 +369,9 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
                 }
               />
             </div>
-            {r.email && (
-              <div>
-                <CampoSensivelMascara
-                  value={r.email}
-                  type="email"
-                  itemLabel={r.studentName || r.name}
-                  collection="rsvps"
-                  itemId={r.id}
-                  onRevealAudit={(p) =>
-                    recordAuditEvent({ ...p, role: profile.role })
-                  }
-                />
-              </div>
-            )}
-          </div>
-        ),
+          )}
+        </div>
+      ),
     },
     {
       id: 'status',
@@ -444,16 +395,9 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
     },
     {
       id: 'acoes',
-      header: 'Ações de Matrícula',
+      header: 'Ações',
       align: 'right',
       render: (r) => {
-        if (isCommunityUser) {
-          return (
-            <span className="text-[11px] text-slate-500">
-              Acompanhamento ativo
-            </span>
-          );
-        }
         const st = r.enrollmentStatus || 'pendente';
         return (
           <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
@@ -462,10 +406,10 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
                 type="button"
                 onClick={() => handleApproveAndEnrollInProject(r)}
                 className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
-                title="Aprovar inscrição e adicionar aluno diretamente à turma do projeto"
+                title="Aprovar inscrição e incluir atleta na vitrine do projeto"
               >
                 <UserPlus className="w-3 h-3" />
-                <span>Aprovar e Matricular</span>
+                <span>Aprovar na Vitrine</span>
               </button>
             )}
             {st !== 'lista_espera' && st !== 'aprovada' && (
@@ -500,7 +444,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
     <div className="space-y-5">
       {/* Spots summary per project */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {allowedProjects.map((proj) => {
+        {projects.map((proj) => {
           const total = proj.totalSpots ?? 100;
           const filled = proj.participants?.length || 0;
           const avail = Math.max(0, total - filled);
@@ -518,7 +462,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
                   {avail} vagas
                 </span>
                 <span className="text-[11px] text-slate-500">
-                  {filled}/{total} matriculados
+                  {filled}/{total} na vitrine
                 </span>
               </div>
             </div>
@@ -532,23 +476,21 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
         keyExtractor={(r) => r.id}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        searchPlaceholder="Buscar por aluno, responsável ou protocolo..."
+        searchPlaceholder="Buscar por interessado, responsável ou protocolo..."
         filterControls={
           <div className="flex flex-wrap items-center gap-2">
-            {!isCommunityUser && (
-              <select
-                value={projectFilter}
-                onChange={(e) => setProjectFilter(e.target.value)}
-                className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
-              >
-                <option value="all">Todos os Projetos</option>
-                {allowedProjects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            )}
+            <select
+              value={projectFilter}
+              onChange={(e) => setProjectFilter(e.target.value)}
+              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
+            >
+              <option value="all">Todos os Projetos</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
 
             <select
               value={statusFilter}
@@ -558,12 +500,12 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
               <option value="all">Todos os Status</option>
               <option value="pendente">Pendentes</option>
               <option value="em_analise">Em Análise</option>
-              <option value="aprovada">Matriculados</option>
+              <option value="aprovada">Aprovados</option>
               <option value="lista_espera">Lista de Espera</option>
               <option value="recusada">Recusadas</option>
             </select>
 
-            {!isCommunityUser && <SeloSensivel level="sensível" />}
+            <SeloSensivel level="sensível" />
           </div>
         }
         headerActions={
@@ -632,7 +574,7 @@ export const InscricoesProjetosView: React.FC<InscricoesProjetosViewProps> = ({
               onChange={(e) => setFormProjectId(e.target.value)}
               className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
             >
-              {allowedProjects.map((p) => (
+              {projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name} ({p.availableSpots ?? 20} vagas)
                 </option>
