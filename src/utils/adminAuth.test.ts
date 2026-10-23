@@ -46,7 +46,19 @@ import {
   maskPhone,
   maskEmail,
   sanitizeShowcaseParticipant,
+  normalizeAdminRole,
+  isRetiredRole,
+  canRoleWriteCollection,
 } from '../admin/permissions.ts';
+
+test('retired roles are inactive and never upgraded', () => {
+  assert.strictEqual(isRetiredRole('professor'), true);
+  assert.strictEqual(isRetiredRole('visitante'), true);
+  assert.strictEqual(isRetiredRole('editor'), false);
+  assert.strictEqual(normalizeAdminRole('professor'), 'parceiro');
+  assert.strictEqual(canRoleWriteCollection('parceiro', 'news_articles'), false);
+  assert.strictEqual(canRoleWriteCollection('parceiro', 'admins'), false);
+});
 
 test('RBAC permissions and LGPD masking', () => {
   assert.strictEqual(canExportSensitiveCsv('super_admin'), true);

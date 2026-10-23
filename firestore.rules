@@ -166,7 +166,8 @@ service cloud.firestore {
       return d.keys().hasOnly([
           'id', 'eventId', 'eventTitle', 'name', 'phone', 'email', 'notes',
           'spots', 'date', 'confirmationCode', 'projectId', 'enrollmentStatus',
-          'studentName', 'studentAge', 'responsibleName', 'modalityOrClass', 'userId'
+          'studentName', 'studentAge', 'responsibleName', 'modalityOrClass', 'userId',
+          'teamId', 'modality'
         ])
         && d.id == docId
         && nonEmptyStr(d.eventId, 120)
@@ -181,6 +182,8 @@ service cloud.firestore {
         && optStr(d, 'responsibleName', 200)
         && optStr(d, 'modalityOrClass', 120)
         && optStr(d, 'userId', 128)
+        && optStr(d, 'teamId', 120)
+        && optStr(d, 'modality', 120)
         && d.spots is int && d.spots >= 1 && d.spots <= 10
         && nonEmptyStr(d.date, 60)
         && nonEmptyStr(d.confirmationCode, 40);

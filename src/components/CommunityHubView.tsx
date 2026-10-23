@@ -152,7 +152,7 @@ export const CommunityHubView: React.FC<CommunityHubViewProps> = ({
     );
     const protocol = `PIX-2026-${Math.floor(1000 + Math.random() * 9000)}`;
     const newPledge: DonationPledgeRecord = {
-      id: `pledge-${Date.now()}`,
+      id: `pledge-${crypto.randomUUID()}`,
       protocol,
       donorName: donorName.trim() || 'Apoiador Anônimo da Comunidade',
       amount: effectivePixAmount,
@@ -193,7 +193,7 @@ export const CommunityHubView: React.FC<CommunityHubViewProps> = ({
     if (!volName.trim()) return;
     const protocol = `VOL-2026-${Math.floor(1000 + Math.random() * 9000)}`;
     const newVol: VolunteerApplicationRecord = {
-      id: `vol-${Date.now()}`,
+      id: `vol-${crypto.randomUUID()}`,
       protocol,
       name: volName.trim(),
       area: volArea,

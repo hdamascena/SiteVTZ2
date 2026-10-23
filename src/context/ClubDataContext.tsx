@@ -868,7 +868,8 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [authLoading, setAuthLoading] = useState<boolean>(true);
   // Set once an admin has loaded the private settings lists, so the public doc never overwrites them
   const privateSettingsLoaded = useRef(false);
-  const authTokenRef = useRef<string | null>(null);
+  // getIdToken() refreshes the 1h Firebase token; a token cached at login made SQL writes fail after an hour
+  const getAuthToken = () => auth.currentUser?.getIdToken().catch(() => null) ?? Promise.resolve(null);
 
   const clearPrivateStateOnLogout = () => {
     privateSettingsLoaded.current = false;
@@ -912,14 +913,12 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const refreshUserProfile = async () => {
     const user = auth.currentUser;
     if (!user) {
-      authTokenRef.current = null;
       setCurrentUserProfile(null);
       setAuthLoading(false);
       clearPrivateStateOnLogout();
       return;
     }
     const token = await user.getIdToken();
-    authTokenRef.current = token;
     const res = await verifyFirebaseAdminAccess(user);
     const sqlProfile = await syncUserWithSqlBackend(token, res.profile);
     const resolvedProfile =
@@ -1099,15 +1098,13 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     return onAuthStateChanged(auth, async (user) => {
       if (!user) {
-        authTokenRef.current = null;
-        setCurrentUserProfile(null);
+          setCurrentUserProfile(null);
         setAuthLoading(false);
         clearPrivateStateOnLogout();
         return;
       }
       setAuthLoading(true);
       const token = await user.getIdToken().catch(() => null);
-      authTokenRef.current = token;
       const [accessRes, sqlProfile] = await Promise.all([
         verifyFirebaseAdminAccess(user),
         token ? syncUserWithSqlBackend(token, null) : Promise.resolve(null),
@@ -1398,16 +1395,19 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const persistAdminRecordToSql = (collectionName: string, itemId: string, payload: unknown) => {
-    if (!authTokenRef.current) return Promise.resolve(false);
-    return fetch(`/api/collections/${encodeURIComponent(collectionName)}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${authTokenRef.current}`,
-      },
-      body: JSON.stringify({ itemId, payload }),
-    })
-      .then((r) => r.ok)
+    return getAuthToken()
+      .then((token) =>
+        token
+          ? fetch(`/api/collections/${encodeURIComponent(collectionName)}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ itemId, payload }),
+            }).then((r) => r.ok)
+          : false
+      )
       .catch(() => false);
   };
 
@@ -1513,7 +1513,7 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       Boolean(rsvpData.projectId) || rsvpData.eventId.startsWith('inscricao-');
     const newRsvp: EventRsvpRecord = {
       ...rsvpData,
-      id: `rsvp-${Date.now()}`,
+      id: `rsvp-${crypto.randomUUID()}`,
       confirmationCode,
       date: new Date().toLocaleString('pt-BR'),
       ...(isProjectEnrollment && !rsvpData.enrollmentStatus
@@ -1555,7 +1555,7 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const addContactMessage = (msgData: Omit<ContactMessageRecord, 'id' | 'date' | 'read'>) => {
     const newMsg: ContactMessageRecord = {
       ...msgData,
-      id: `msg-${Date.now()}`,
+      id: `msg-${crypto.randomUUID()}`,
       date: new Date().toLocaleString('pt-BR'),
       read: false,
     };
@@ -1575,7 +1575,7 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const protocol = `SCT-2026-${Math.floor(1000 + Math.random() * 9000)}`;
     const newInquiry: ScoutInquiryRecord = {
       ...inquiryData,
-      id: `scout-${Date.now()}`,
+      id: `scout-${crypto.randomUUID()}`,
       protocol,
       createdAt: new Date().toLocaleString('pt-BR'),
       status: 'nova',
@@ -1819,19 +1819,20 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const fsWrite = Promise.resolve().then(() =>
           setDoc(doc(db, collectionName, id), sanitized)
         );
-        const sqlWrite = authTokenRef.current
-          ? fetch(`/api/collections/${encodeURIComponent(collectionName)}`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${authTokenRef.current}`,
-              },
-              body: JSON.stringify({ itemId: id, payload: sanitized }),
-            }).then((r) => {
-              if (!r.ok) throw new Error(`SQL HTTP ${r.status}`);
-              return r.json();
-            })
-          : Promise.reject(new Error('Sem token para Cloud SQL'));
+        const sqlWrite = getAuthToken().then((token) => {
+          if (!token) throw new Error('Sem token para Cloud SQL');
+          return fetch(`/api/collections/${encodeURIComponent(collectionName)}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ itemId: id, payload: sanitized }),
+          }).then((r) => {
+            if (!r.ok) throw new Error(`SQL HTTP ${r.status}`);
+            return r.json();
+          });
+        });
 
         writes.push(
           Promise.allSettled([sqlWrite, fsWrite]).then(([sqlRes, fsRes]) => {
@@ -1860,18 +1861,19 @@ export const ClubDataProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             const fsDel = Promise.resolve().then(() =>
               deleteDoc(doc(db, collectionName, item.id))
             );
-            const sqlDel = authTokenRef.current
-              ? fetch(
-                  `/api/collections/${encodeURIComponent(collectionName)}/${encodeURIComponent(item.id)}`,
-                  {
-                    method: 'DELETE',
-                    headers: { Authorization: `Bearer ${authTokenRef.current}` },
-                  }
-                ).then((r) => {
-                  if (!r.ok) throw new Error(`SQL HTTP ${r.status}`);
-                  return true;
-                })
-              : Promise.reject(new Error('Sem token para Cloud SQL'));
+            const sqlDel = getAuthToken().then((token) => {
+              if (!token) throw new Error('Sem token para Cloud SQL');
+              return fetch(
+                `/api/collections/${encodeURIComponent(collectionName)}/${encodeURIComponent(item.id)}`,
+                {
+                  method: 'DELETE',
+                  headers: { Authorization: `Bearer ${token}` },
+                }
+              ).then((r) => {
+                if (!r.ok) throw new Error(`SQL HTTP ${r.status}`);
+                return true;
+              });
+            });
             writes.push(
               Promise.allSettled([sqlDel, fsDel]).then(([sqlRes, fsRes]) => {
                 if (sqlRes.status === 'fulfilled' || fsRes.status === 'fulfilled') {

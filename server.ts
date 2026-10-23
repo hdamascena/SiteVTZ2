@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
 import {
@@ -14,6 +15,8 @@ import {
   getUploadedFile,
   resolveUserProfile,
   purgeObsoleteCollections,
+  insertCollectionRecordIfNew,
+  takeEventSpots,
 } from './src/db/users.ts';
 import {
   getReadablePrivateCollections,
@@ -50,6 +53,8 @@ async function startServer() {
 
   await purgeObsoleteCollections();
 
+  // Public forms carry short text only; parsed first so anonymous posts never get the 25mb admin limit
+  app.use('/api/submissions', express.json({ limit: '100kb' }));
   app.use(express.json({ limit: '25mb' }));
 
   app.post('/api/me', requireAuth, async (req: AuthRequest, res) => {
@@ -149,7 +154,17 @@ async function startServer() {
       return res.status(400).json({ error: 'itemId and payload are required' });
     }
     try {
-      const saved = await upsertCollectionRecord(collectionName, String(itemId), payload);
+      // Insert only: an anonymous visitor must never overwrite an existing record
+      const saved = await insertCollectionRecordIfNew(collectionName, String(itemId), payload);
+      if (!saved) {
+        return res.status(409).json({ error: 'Record already exists' });
+      }
+      if (collectionName === 'rsvps' && typeof payload.eventId === 'string') {
+        const spots = Math.min(10, Math.max(1, Math.floor(Number(payload.spots)) || 1));
+        await takeEventSpots(payload.eventId, spots).catch((err) =>
+          console.error('Failed to update event spots:', err)
+        );
+      }
       res.json(saved);
     } catch (error: any) {
       console.error(`Failed to record submission in ${collectionName}:`, error);
@@ -233,25 +248,27 @@ async function startServer() {
   });
 
   app.post('/api/files', requireAuth, async (req: AuthRequest, res) => {
-    const { id, fileName, mimeType, sizeBytes, dataUrl } = req.body || {};
+    const { fileName, mimeType, sizeBytes, dataUrl } = req.body || {};
     if (!fileName || !dataUrl || typeof dataUrl !== 'string') {
       return res.status(400).json({ error: 'fileName and dataUrl are required' });
     }
     try {
-      const fileId =
-        typeof id === 'string' && id.trim()
-          ? id.trim()
-          : `file-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      const dbUser = req.user?.uid
-        ? await getOrCreateUser(req.user.uid, req.user.email || '')
-        : undefined;
+      if (!req.user?.uid) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      const { profile, dbUserId } = await resolveUserProfile(req.user.uid, req.user.email || '');
+      if (!profile.ativo) {
+        return res.status(403).json({ error: 'Account inactive' });
+      }
+      // Server-generated id so an upload can never replace an existing file
+      const fileId = `file-${randomUUID()}`;
       const saved = await saveUploadedFile({
         id: fileId,
         fileName: String(fileName),
         mimeType: String(mimeType || 'application/octet-stream'),
         sizeBytes: Number(sizeBytes) || dataUrl.length,
         dataUrl,
-        userId: dbUser?.id,
+        userId: dbUserId,
       });
       res.json({
         ...saved,
@@ -271,7 +288,7 @@ async function startServer() {
       }
       const match = /^data:([^;,]+)?(?:;base64)?,(.*)$/s.exec(record.dataUrl);
       if (!match) {
-        return res.redirect(record.dataUrl);
+        return res.status(404).json({ error: 'File not found' });
       }
       const mimeType = record.mimeType || match[1] || 'application/octet-stream';
       const base64Data = match[2];
@@ -279,7 +296,10 @@ async function startServer() {
       const safeName = record.fileName.replace(/[^\w.-]/g, '_');
       res.setHeader('Content-Type', mimeType);
       res.setHeader('Content-Length', buffer.length);
-      res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+      // Only plain images and PDFs open in the browser; HTML, SVG and the rest download so they cannot run scripts on this origin
+      const inline = /^(image\/(png|jpeg|gif|webp|avif)|application\/pdf)$/.test(mimeType);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${safeName}"`);
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
       res.send(buffer);
     } catch (error: any) {

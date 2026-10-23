@@ -33,8 +33,12 @@ export function normalizeAdminRole(raw?: string | null): AdminRole {
   ) {
     return raw;
   }
-  if (raw === 'professor') return 'editor';
   return 'parceiro';
+}
+
+// Roles removed in the showcase pivot: their accounts stay inactive until an admin re-invites them
+export function isRetiredRole(raw?: string | null): boolean {
+  return raw === 'visitante' || raw === 'apoiador' || raw === 'professor';
 }
 
 export const ROLE_SECTIONS: Record<AdminRole, AdminSectionId[]> = {

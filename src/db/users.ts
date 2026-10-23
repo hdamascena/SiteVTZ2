@@ -1,8 +1,8 @@
 import { db } from './index.ts';
 import { users, collectionItems, uploadedFiles } from './schema.ts';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import type { AdminRole, AdminUserProfile, AdminInviteRecord } from '../admin/types.ts';
-import { normalizeAdminRole } from '../admin/permissions.ts';
+import { normalizeAdminRole, isRetiredRole } from '../admin/permissions.ts';
 
 export const PRIMARY_ADMIN_EMAIL = 'higor.rock2011@gmail.com';
 
@@ -59,7 +59,7 @@ export async function resolveUserProfile(
   const existingAdminItem = await getCollectionItemById('admins', uid);
   if (existingAdminItem && existingAdminItem.payload && typeof existingAdminItem.payload === 'object') {
     const raw = existingAdminItem.payload as Record<string, any>;
-    const isLegacyVisitor = raw.role === 'visitante' || raw.role === 'apoiador';
+    const isLegacyVisitor = isRetiredRole(raw.role);
     const role: AdminRole = isPrimaryOwner
       ? 'super_admin'
       : normalizeAdminRole(raw.role);
@@ -220,6 +220,45 @@ export async function upsertCollectionRecord(
     console.error('Database query failed in upsertCollectionRecord:', error);
     throw new Error('Database query failed. Please try again later.', { cause: error });
   }
+}
+
+export async function insertCollectionRecordIfNew(
+  collectionName: string,
+  itemId: string,
+  payload: unknown
+) {
+  try {
+    const result = await db
+      .insert(collectionItems)
+      .values({
+        id: `${collectionName}:${itemId}`,
+        collectionName,
+        itemId,
+        payload,
+        updatedAt: new Date(),
+      })
+      .onConflictDoNothing()
+      .returning();
+    return result[0] || null;
+  } catch (error) {
+    console.error('Database query failed in insertCollectionRecordIfNew:', error);
+    throw new Error('Database query failed. Please try again later.', { cause: error });
+  }
+}
+
+// One atomic UPDATE, so two visitors booking at the same moment both count
+export async function takeEventSpots(eventId: string, spots: number) {
+  await db.execute(sql`
+    UPDATE collection_items
+    SET payload = jsonb_set(
+      payload,
+      '{availableSpots}',
+      to_jsonb(GREATEST(0, (payload->>'availableSpots')::numeric - ${spots}))
+    ),
+    updated_at = now()
+    WHERE id = ${`events:${eventId}`}
+      AND jsonb_typeof(payload->'availableSpots') = 'number'
+  `);
 }
 
 export async function deleteCollectionRecord(collectionName: string, itemId: string) {

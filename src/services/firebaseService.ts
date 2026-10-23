@@ -11,7 +11,7 @@ import {
 } from 'firebase/auth';
 import { db, auth } from '../firebase.ts';
 import type { AdminRole, AdminUserProfile, AdminInviteRecord } from '../admin/types.ts';
-import { normalizeAdminRole } from '../admin/permissions.ts';
+import { normalizeAdminRole, isRetiredRole } from '../admin/permissions.ts';
 
 export const PRIMARY_ADMIN_EMAIL = 'higor.rock2011@gmail.com';
 
@@ -67,7 +67,7 @@ export async function verifyFirebaseAdminAccess(
     // 1. Check existing /admins/{uid}
     if (adminDoc.exists()) {
       const data = adminDoc.data();
-      const isLegacyVisitor = data.role === 'visitante' || data.role === 'apoiador';
+      const isLegacyVisitor = isRetiredRole(data.role);
       const profile: AdminUserProfile = {
         uid: user.uid,
         email: data.email || user.email,
@@ -243,7 +243,7 @@ export async function fetchAllAdminsAndInvites(): Promise<{
         nome: raw.nome || raw.email || d.id,
         role: normalizeAdminRole(raw.role),
         projectIds: Array.isArray(raw.projectIds) ? raw.projectIds : [],
-        ativo: raw.ativo !== false && raw.role !== 'visitante' && raw.role !== 'apoiador',
+        ativo: raw.ativo !== false && !isRetiredRole(raw.role),
         criadoEm: raw.criadoEm || '',
         criadoPor: raw.criadoPor || '',
       });
@@ -260,7 +260,7 @@ export async function fetchAllAdminsAndInvites(): Promise<{
           nome: String(raw.nome || raw.email || raw.uid),
           role: normalizeAdminRole(raw.role),
           projectIds: Array.isArray(raw.projectIds) ? raw.projectIds : [],
-          ativo: raw.ativo !== false && raw.role !== 'visitante' && raw.role !== 'apoiador',
+          ativo: raw.ativo !== false && !isRetiredRole(raw.role),
           criadoEm: String(raw.criadoEm || ''),
           criadoPor: String(raw.criadoPor || ''),
         });
